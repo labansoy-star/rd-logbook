@@ -171,6 +171,10 @@
   #gate .spin{width:34px;height:34px;margin:0 auto;border:4px solid var(--brand-soft);border-top-color:var(--brand);
     border-radius:50%;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
+  /* โหมดผู้ใช้ทั่วไป (เพิ่ม/ดู) — ซ่อนปุ่มที่ใช้แก้ไข/ลบ/นำเข้า */
+  body.role-limited .editor-only{display:none !important}
+  body.role-limited header{border-bottom-color:var(--warn)}
+  #roleBadge .pill{font-size:11.5px}
 </style>
 </head>
 <body>
@@ -186,6 +190,7 @@
     </div>
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+    <span id="roleBadge"></span>
     <span id="syncInfo" style="font-size:11.5px;color:var(--muted)"></span>
     <button class="btn ghost small" onclick="reloadAll()">🔄 รีเฟรช</button>
     <button class="btn ghost small" onclick="doLogout()">ออกจากระบบ</button>
@@ -669,6 +674,9 @@ const SESS_KEY = 'rd-supabase-session';
 const REG_KEYS = ['rq','rd','rm','fg','is','sl','formulas'];
 let session = null;
 let saving = false, dirty = false;
+let IS_EDITOR = true;        // สิทธิ์แก้ไข-ลบ (editor). ผู้ใช้ทั่วไป = เพิ่ม/ดูได้ แต่แก้/ลบของเดิมไม่ได้
+let serverIds = new Set();   // รหัสรายการที่อยู่บนเซิร์ฟเวอร์แล้ว (ใช้ในโหมดเพิ่มอย่างเดียว)
+function canEdit(){ return IS_EDITOR; }
 
 function sbConfigured(){ return /^https:\/\/.+\.supabase\.co\/?$/.test(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 40; }
 function sbBase(){ return SUPABASE_URL.replace(/\/$/,''); }
@@ -768,7 +776,9 @@ async function bootstrapData(){
     const res=await sbREST('rd_records?select=reg,rec_id,data&order=rec_id', {method:'GET'});
     const rows=await res.json();
     const s={rq:[],rd:[],rm:[],fg:[],is:[],sl:[],formulas:[]};
+    serverIds = new Set();
     rows.forEach(function(r){
+      serverIds.add(r.reg+'|'+r.rec_id);
       if(!s[r.reg]) return;
       const o=r.data||{};
       if(r.reg==='formulas'){ if(!o.id) o.id=r.rec_id; }
@@ -776,6 +786,7 @@ async function bootstrapData(){
       s[r.reg].push(o);
     });
     state=s;
+    await checkRole(); applyRole();
     Object.keys(REGS).forEach(function(reg){ clearForm(reg); renderTable(reg); });
     hideGate(); switchTab('dash');
     setSyncInfo('ซิงก์แล้ว '+new Date().toLocaleTimeString('th-TH'));
@@ -788,6 +799,24 @@ async function bootstrapData(){
 }
 function reloadAll(){ bootstrapData(); }
 
+/* ---------- สิทธิ์ผู้ใช้: editor (แก้/ลบได้) หรือ ผู้ใช้ทั่วไป (เพิ่ม/ดูเท่านั้น) ---------- */
+async function checkRole(){
+  IS_EDITOR = true;
+  try{
+    const uid = session && session.user && session.user.id;
+    if(!uid) return;
+    const res = await sbREST('editors?uid=eq.'+encodeURIComponent(uid)+'&select=uid', {method:'GET'});
+    const arr = await res.json();
+    IS_EDITOR = Array.isArray(arr) && arr.length>0;
+  }catch(e){ IS_EDITOR = true; } // เผื่อยังไม่ได้ตั้งตาราง editors → ถือเป็น editor ไว้ก่อน (ปลอดภัย)
+}
+function applyRole(){
+  document.body.classList.toggle('role-limited', !IS_EDITOR);
+  const b=document.getElementById('roleBadge');
+  if(b) b.innerHTML = IS_EDITOR ? '' :
+    '<span class="pill warn" title="บัญชีนี้เพิ่มและดูข้อมูลได้ แต่แก้ไขหรือลบของเดิมไม่ได้">👁 โหมดเพิ่ม/ดู · แก้-ลบไม่ได้</span>';
+}
+
 /* ---------- บันทึก (เรียกจากทุกจุดที่เดิมเรียก save()) ----------
    บันทึกทั้งก้อนแบบ upsert + ลบรายการที่หายไป • ถ้ากดรัวๆ จะรวบเป็นครั้งเดียว */
 function save(){
@@ -795,7 +824,8 @@ function save(){
   if(saving){ dirty=true; return; }
   saving=true; setSyncInfo('กำลังบันทึก…');
   const snap=JSON.parse(JSON.stringify(state));
-  pushState(snap).then(function(){
+  const pusher = canEdit() ? pushState : pushInsertsOnly;
+  pusher(snap).then(function(){
     setSyncInfo('ซิงก์แล้ว '+new Date().toLocaleTimeString('th-TH'));
   }).catch(function(e){
     if(String(e.message).indexOf('session expired')<0){
@@ -809,6 +839,16 @@ function save(){
 }
 /* รหัสประจำแถว: ทะเบียนทั่วไปใช้ _id • คลังสูตรใช้ id (usr-RD-69-001) */
 function recId(o){ return String((o && (o._id || o.id)) || ''); }
+/* โหมดผู้ใช้ทั่วไป: เพิ่มเฉพาะรายการใหม่ (ไม่แตะของเดิม ไม่ลบ) — RLS ฝั่งเซิร์ฟเวอร์กันการแก้/ลบไว้อีกชั้น */
+async function pushInsertsOnly(snap){
+  for(const reg of REG_KEYS){
+    const rows=(snap[reg]||[]).filter(function(o){ var id=recId(o); return id && !serverIds.has(reg+'|'+id); });
+    if(!rows.length) continue;
+    await sbREST('rd_records', {method:'POST', headers:{'Prefer':'return=minimal'},
+      body:JSON.stringify(rows.map(function(o){ return {reg:reg, rec_id:recId(o), data:o}; }))});
+    rows.forEach(function(o){ serverIds.add(reg+'|'+recId(o)); });
+  }
+}
 async function pushState(snap){
   for(const reg of REG_KEYS){
     const rows=(snap[reg]||[]).filter(function(o){ return recId(o); });
@@ -1008,6 +1048,7 @@ function saveEntry(reg){
   save(); clearForm(reg); renderTable(reg);
 }
 function editEntry(reg,id){
+  if(!canEdit()){ alert('บัญชีนี้แก้ไขข้อมูลไม่ได้ (เพิ่ม/ดูได้อย่างเดียว)'); return; }
   const row=state[reg].find(r=>r._id===id); if(!row) return;
   setForm(reg,row); editing[reg]=id;
   if(reg==='rd'){ rdBatch=row.batch?JSON.parse(JSON.stringify(row.batch)):{fid:'',fname:'',vol:'',lines:[]}; if(!rdBatch.lines)rdBatch.lines=[]; renderBatchEditor(); }
@@ -1017,6 +1058,7 @@ function editEntry(reg,id){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function delEntry(reg,id){
+  if(!canEdit()){ alert('บัญชีนี้ลบข้อมูลไม่ได้ (เพิ่ม/ดูได้อย่างเดียว)'); return; }
   const row=state[reg].find(r=>r._id===id);
   if(!confirm('ลบรายการ '+(row.code||row.sampleCode||'นี้')+' ?')) return;
   state[reg]=state[reg].filter(r=>r._id!==id); save(); renderTable(reg);
@@ -1078,6 +1120,7 @@ function fgStockBalance(row){
 }
 /* รับวัตถุดิบตัวเดิมเข้าเพิ่ม (เช่น น้ำตาลหมด ขอเพิ่ม) — บวกเข้าสต็อกเดิม ไม่ต้องสร้างรหัสใหม่ */
 function refillStock(id){
+  if(!canEdit()){ alert('บัญชีนี้แก้ไขข้อมูลไม่ได้ (เพิ่ม/ดูได้อย่างเดียว)'); return; }
   var r=state.rm.find(function(x){return x._id===id;}); if(!r) return;
   var add=prompt('รับ "'+(r.nameTh||r.code)+'" เข้าเพิ่มอีกกี่ '+(r.stockUnit||'หน่วย')+'?\n(ระบบจะบวกเข้าสต็อกเดิม '+(parseFloat(r.receivedQty)||0)+' '+(r.stockUnit||'')+')');
   if(add===null) return;
@@ -1157,14 +1200,16 @@ function renderTable(reg){
     const f=cfg.fields.find(x=>x.k===k); return `<th>${esc(f?f.l:k)}</th>`;
   }).join('')+'<th>จัดการ</th></tr>';
   const body=rows.map((r,i)=>'<tr><td>'+(i+1)+'</td>'+cfg.cols.map(k=>`<td>${cellVal(reg,r,k)}</td>`).join('')+
-    `<td style="white-space:nowrap"><button class="btn ghost small" onclick="editEntry('${reg}','${r._id}')">แก้ไข</button> `+
+    `<td style="white-space:nowrap">`+
+    (canEdit()?`<button class="btn ghost small" onclick="editEntry('${reg}','${r._id}')">แก้ไข</button> `:'')+
     (reg==='is'?`<button class="btn ghost small" onclick="printSlip('${r._id}')">🖨 ใบเบิก</button> `:'')+
     (reg==='is'&&r.purpose==='ส่งลูกค้า'?`<button class="btn ghost small" onclick="printEnvelope('${r._id}')">✉️ จ่าหน้าซอง</button> `:'')+
     (reg==='rd'?`<button class="btn ghost small" onclick="printRD('${r._id}')">🖨 FM-RD-01</button> `:'')+
-    (reg==='rm'?`<button class="btn ghost small" onclick="refillStock('${r._id}')">➕ รับเข้าเพิ่ม</button> `:'')+
+    (reg==='rm'&&canEdit()?`<button class="btn ghost small" onclick="refillStock('${r._id}')">➕ รับเข้าเพิ่ม</button> `:'')+
     (reg==='fg'?`<button class="btn ghost small" onclick="printLabel('${r._id}')">🏷️ Label</button> `:'')+
-    (reg==='sl'?`<button class="btn ghost small" onclick="slAddTastingFor('${r._id}')">➕ บันทึกผลชิม</button> `:'')+
-    `<button class="btn danger small" onclick="delEntry('${reg}','${r._id}')">ลบ</button></td></tr>`).join('');
+    (reg==='sl'&&canEdit()?`<button class="btn ghost small" onclick="slAddTastingFor('${r._id}')">➕ บันทึกผลชิม</button> `:'')+
+    (canEdit()?`<button class="btn danger small" onclick="delEntry('${reg}','${r._id}')">ลบ</button>`:'<span style="color:var(--muted);font-size:12px">ดูอย่างเดียว</span>')+
+    `</td></tr>`).join('');
   document.getElementById('table-'+reg).innerHTML=head+(body||`<tr><td colspan="${cfg.cols.length+2}" style="text-align:center;color:var(--muted)">— ยังไม่มีข้อมูล —</td></tr>`);
   if(reg==='is') renderBalance();
 }
@@ -1357,8 +1402,8 @@ function buildDataTab(){
     <div class="hint">ข้อมูลเก็บในฐานข้อมูล Supabase (ซิงก์ทุกเครื่องอัตโนมัติ) — แนะนำสำรองเป็นไฟล์ JSON เก็บไว้ในโฟลเดอร์ระบบเอกสารเดือนละครั้ง เผื่อกรณีลบข้อมูลผิด</div>
     <div class="btnrow">
       <button class="btn primary" onclick="exportJSON()">⬇ บันทึกไฟล์สำรอง (JSON)</button>
-      <label class="btn ghost" style="cursor:pointer">⬆ นำเข้าไฟล์สำรอง <input type="file" accept=".json" style="display:none" onchange="importJSON(this)"></label>
-      <button class="btn danger" onclick="wipe()">🗑 ล้างข้อมูลทั้งหมด</button>
+      <label class="btn ghost editor-only" style="cursor:pointer">⬆ นำเข้าไฟล์สำรอง <input type="file" accept=".json" style="display:none" onchange="importJSON(this)"></label>
+      <button class="btn danger editor-only" onclick="wipe()">🗑 ล้างข้อมูลทั้งหมด</button>
     </div>
     <div class="hint" style="margin-top:14px">ปุ่ม "ส่งออก CSV" ในแต่ละแท็บ จะได้ไฟล์ที่เปิดใน Excel ได้ทันที (รองรับภาษาไทย) หัวคอลัมน์ตรงกับทะเบียน SD-RD-10 ถึง 15 — เปิดแล้วคัดลอกแถวไปวางในไฟล์ทะเบียน Excel ได้เลย</div>
   </div></section>`;
@@ -1372,6 +1417,7 @@ function exportJSON(){
   download(`RD-Logbook-backup-${todayISO()}.json`, JSON.stringify(state,null,1), 'application/json');
 }
 function importJSON(input){
+  if(!canEdit()){ alert('บัญชีนี้นำเข้า/แทนที่ข้อมูลไม่ได้ (เพิ่ม/ดูได้อย่างเดียว)'); input.value=''; return; }
   const file=input.files[0]; if(!file) return;
   const rd=new FileReader();
   rd.onload=()=>{ try{
@@ -1383,6 +1429,7 @@ function importJSON(input){
   rd.readAsText(file); input.value='';
 }
 function wipe(){
+  if(!canEdit()){ alert('บัญชีนี้ลบข้อมูลไม่ได้ (เพิ่ม/ดูได้อย่างเดียว)'); return; }
   if(!confirm('ลบข้อมูลทุกทะเบียนในโปรแกรม (ไฟล์ Excel ไม่เกี่ยว) แนะนำให้สำรอง JSON ก่อน — ยืนยัน?')) return;
   if(!confirm('ยืนยันครั้งสุดท้าย: ลบทั้งหมดจริงหรือไม่?')) return;
   state={rq:[],rd:[],rm:[],fg:[],is:[],sl:[],formulas:[]}; save(); switchTab('dash');
