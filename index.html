@@ -926,6 +926,7 @@ function buildRegTab(reg){
       </div>
       <div class="searchrow"><label style="font-size:13px;color:var(--muted)">ค้นหา:</label><input type="text" id="search-${reg}" placeholder="พิมพ์คำค้น เช่น รหัส ชื่อสูตร ลูกค้า…" oninput="renderTable('${reg}')"></div>
       <div class="tablewrap"><table id="table-${reg}"></table></div>
+      ${reg==='rm' ? buildRmMaster() : ''}
       ${reg==='is' ? `<h2 style="margin-top:20px">📊 สรุปยอดคงเหลือตัวอย่าง (อัตโนมัติ)</h2>
       <div class="hint">ยอดผลิตดึงจากทะเบียนตัวอย่างทดลอง (RD) / จำนวนที่เบิกรวมจากทะเบียนนี้ — คงเหลือ = ผลิต − เบิก</div>
       <div class="tablewrap"><table id="table-balance"></table></div>`:''}
@@ -1232,6 +1233,77 @@ function renderDash(){
 }
 
 /* ================= แท็บมาตรฐาน ================= */
+/* ฐานข้อมูลวัตถุดิบมาตรฐานโรงงาน (อ้างอิงจาก SD-RD-03 มาตรฐานการรับวัตถุดิบ) — รายชื่ออ้างอิง ไม่มีสต็อก */
+const RM_MASTER = [
+  {n:'ถั่วเหลืองเมล็ดแห้ง', cat:'เมล็ด/ธัญพืช', shelf:'', alg:'ถั่วเหลือง'},
+  {n:'เมล็ดงา(งาขาว, งาดำ)', cat:'เมล็ด/ธัญพืช', shelf:'6 months', alg:'งา'},
+  {n:'เทียนดำ (Black Cumin seeds)', cat:'เมล็ด/ธัญพืช', shelf:'6 months', alg:'-'},
+  {n:'ถั่วดำ(Black bean, Vigna mungo(L.) Hepper)', cat:'เมล็ด/ธัญพืช', shelf:'6 months', alg:'-'},
+  {n:'ข้าวบาร์เลย์', cat:'เมล็ด/ธัญพืช', shelf:'1 year', alg:'กลูเตน'},
+  {n:'น้ำนมโคดิบ', cat:'นม', shelf:'', alg:'นม'},
+  {n:'กะทิผง (Coconut milk Powder)', cat:'ผง/สารสกัด', shelf:'2 years', alg:'-'},
+  {n:'ผงกล้วย (Banana Extract Powder)', cat:'ผง/สารสกัด', shelf:'2 years', alg:'-'},
+  {n:'Sodium caseinate ( ES01 )', cat:'วัตถุเจือปนอาหาร', shelf:'2 years', alg:'นม'},
+  {n:'Sodium Carboxymethyl Cellulose , INS no.466 (ES02)', cat:'วัตถุเจือปนอาหาร', shelf:'2 years', alg:'-'},
+  {n:'Mono-and diglycerides of fatty acid, INS no.471 (ES03)', cat:'วัตถุเจือปนอาหาร', shelf:'2 years', alg:'-'},
+  {n:'Gum arabic, INS No.414 (ES04)', cat:'วัตถุเจือปนอาหาร', shelf:'6 years', alg:'-'},
+  {n:'Disodium hydrogen phosphate, INS No :339 (ii)  , N01', cat:'วัตถุเจือปนอาหาร', shelf:'6 years', alg:'-'},
+  {n:'Trisodium citrate (E 331(iii) ), N02', cat:'วัตถุเจือปนอาหาร', shelf:'5 years', alg:'-'},
+  {n:'ครีมเทียม', cat:'นม', shelf:'2 years', alg:'-'},
+  {n:'น้ำนมแพะ', cat:'นม', shelf:'', alg:'นม'},
+  {n:'นมผงชนิดพร่องมันเนย (Whole milk)', cat:'นม', shelf:'2 years', alg:'นม'},
+  {n:'นมผงชนิดขาดมันเนย (Skim milk)', cat:'นม', shelf:'2 years', alg:'นม'},
+  {n:'น้ำมันปาล์ม', cat:'น้ำมัน', shelf:'1 year', alg:'-'},
+  {n:'น้ำตาลทรายขาว (White Sugar)', cat:'น้ำตาล/เกลือ', shelf:'2 years', alg:'-'},
+  {n:'เกลือบริโภคบริสุทธิ์ (Refined edible common)', cat:'น้ำตาล/เกลือ', shelf:'1 year', alg:'-'},
+  {n:'กลิ่นกล้วย (Banana flavour)', cat:'กลิ่น', shelf:'1 year', alg:'-'},
+  {n:'กลิ่นช็อคโกแล็ต  (chocolate flavour)', cat:'กลิ่น', shelf:'1 year', alg:'-'},
+  {n:'Eurocert Tartrazine, ( E 102 ), (สีกล้วย)', cat:'สี', shelf:'6 years', alg:'-'},
+  {n:'Sunset Yellow FCF (E110), (สีมะม่วง)', cat:'สี', shelf:'6 years', alg:'-'},
+  {n:'Erythrosine, ( E 129 ) (สีสตอเบอร์รี่)', cat:'สี', shelf:'6 years', alg:'-'},
+  {n:'ผงโกโก้ (Cocoa powder)', cat:'ผง/สารสกัด', shelf:'2 years', alg:'-'},
+  {n:'Cap  seal (ชริ้งค์คอขวด)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'PE Shrink 500 mm. หนา 90 mic', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'PE Shrink 270 mm. หนา 70 mic', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ฝาจีบ (Crown cap)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ฝาเกลียว (Screw cap)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ฝาแม็กซี่ (Maxi cap)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ขวดสูง (Laban)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ขวดสูงปากเกลียว (Laban)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'กล่องกระดาษ_ขวดสูง', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ถาดรอง ( Tray_ขวดสูง)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ฝาครอบ (Tray cover_ขวดสูง)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'ฉลาก( ขวดสูง)', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'มอลต์สกัด (Malt extract)', cat:'ผง/สารสกัด', shelf:'1 year', alg:'กลูเตน'},
+  {n:'ฟิล์มนมโรงเรียน', cat:'บรรจุภัณฑ์', shelf:'', alg:'-'},
+  {n:'กลิ่นงาดำ (Black sesame flavour)', cat:'กลิ่น', shelf:'1 year', alg:'-'},
+  {n:'กลิ่นกะทิ( Coconut flavour)', cat:'กลิ่น', shelf:'1 year', alg:'-'},
+];
+
+/* ================= ฐานข้อมูลวัตถุดิบมาตรฐานโรงงาน (อ้างอิง SD-RD-03) ================= */
+function buildRmMaster(){
+  const rows = RM_MASTER.map((m,i)=>`<tr>`
+    +`<td style="text-align:center;color:var(--muted)">${i+1}</td>`
+    +`<td style="font-weight:600">${esc(m.n)}</td>`
+    +`<td>${esc(m.cat)||'-'}</td>`
+    +`<td style="text-align:center">${esc(m.shelf)||'-'}</td>`
+    +`<td style="text-align:center">${(m.alg&&m.alg!=='-')?`<span class="pill warn">${esc(m.alg)}</span>`:'<span style="color:var(--muted)">-</span>'}</td>`
+    +`</tr>`).join('');
+  return `<h2 style="margin-top:24px">📚 ฐานข้อมูลวัตถุดิบมาตรฐานโรงงาน <span style="font-size:13px;font-weight:400;color:var(--muted)">(${RM_MASTER.length} รายการ • อ้างอิง SD-RD-03)</span></h2>
+    <div class="hint">รายชื่อวัตถุดิบมาตรฐานที่โรงงานใช้ (ตัวเดียวกับที่อ้างอิงในสูตร) — <b>เป็นข้อมูลอ้างอิงอย่างเดียว ไม่มีการตัดสต็อก/คิดคงเหลือ</b> • "สารก่อภูมิแพ้" ระบุเบื้องต้นตามชนิดวัตถุดิบ ให้ยึดสเปคการรับใน SD-RD-03 เป็นหลัก • พิมพ์ค้นหาเพื่อกรอง</div>
+    <div class="searchrow"><label style="font-size:13px;color:var(--muted)">ค้นหา:</label><input type="text" id="rmmaster-search" placeholder="พิมพ์ชื่อ/ประเภท เช่น นม, กลิ่น, ถั่วเหลือง, บรรจุภัณฑ์…" oninput="filterRmMaster(this.value)"></div>
+    <div class="tablewrap"><table id="rmmaster-table">
+      <thead><tr><th>#</th><th>ชื่อวัตถุดิบ</th><th>ประเภท</th><th>อายุเก็บ</th><th>สารก่อภูมิแพ้</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+function filterRmMaster(q){
+  q=(q||'').toLowerCase().trim();
+  document.querySelectorAll('#rmmaster-table tbody tr').forEach(function(tr){
+    tr.style.display = (!q || tr.textContent.toLowerCase().indexOf(q)>=0) ? '' : 'none';
+  });
+}
+
 function buildStdTab(){
   return `<section class="tab" id="tab-std"><div class="card">
     <h2>📏 มาตรฐานค่าควบคุมในกระบวนการผลิต (SD-RD-04)</h2>
