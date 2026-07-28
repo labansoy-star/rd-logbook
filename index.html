@@ -1228,26 +1228,53 @@ function renderDash(){
   html+=`<div class="card" style="margin-top:16px"><h2>🔔 งานที่ต้องติดตาม</h2><div class="hint">รวมจากทุกทะเบียน — เข้ามาดูหน้านี้ทุกสัปดาห์</div>`+
     (li.length?('<ul style="margin-left:20px;line-height:2">'+li.map(x=>`<li>${x}</li>`).join('')+'</ul>'):'<div style="color:var(--ok)">✔ ไม่มีงานค้างที่ต้องเตือน</div>')+'</div>';
 
-  html+=`<div class="card"><h2>🧭 ขั้นตอนการทำงาน (ย่อจากคู่มือ SD-RD-16)</h2>
-  <ol style="margin-left:20px;line-height:1.9;font-size:13.5px">
-    <li>มีคำขอพัฒนา → บันทึกแท็บ <b>คำขอพัฒนา</b> ออกเลข RQ + พิมพ์ FM-RD-05 ให้เซ็น (โฟลเดอร์ 01)</li>
-    <li>เริ่มพัฒนา → แท็บ <b>ตัวอย่างทดลอง</b> ออกรหัส RD + กรอกฟอร์ม FM-RD-01 + สร้างโฟลเดอร์ย่อยใน 02/ตามรหัสตัวอย่าง</li>
-    <li>วัตถุดิบใหม่ส่งมา → แท็บ <b>วัตถุดิบ</b> ลงทันที สถานะ "รับตัวอย่างแล้ว-รอทดลอง" + กำหนดต้องทดลอง</li>
-    <li>แก้สูตร → ปุ่ม "ออกรหัสรอบแก้" (-R1, -R2) ในแท็บตัวอย่างทดลอง</li>
-    <li>ผ่านชิม (FM-RD-04) + อนุมัติขาย → แท็บ <b>สินค้า FG</b> ออกรหัส FG อ้างรหัส RD ต้นทาง + ทำสเปค SD-RD-01 + เช็คฉลาก FM-RD-02</li>
-    <li>เบิกส่งลูกค้า → แท็บ <b>เบิก-จ่าย</b> + พิมพ์ใบเบิก FM-RD-06 ให้เซ็น — ระบบตัดยอดคงเหลือให้</li>
-    <li>ตัวที่เข้าเกณฑ์ → แท็บ <b>Shelf-life</b> ระบบนัดรอบชิมรายเดือน + บันทึกผลลง FM-RD-03</li>
-  </ol></div>`;
   document.getElementById('tab-dash').innerHTML=html;
 }
 
 /* ================= แท็บมาตรฐาน ================= */
 function buildStdTab(){
-  const rows=Object.entries(STD).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.brix[0]} – ${v.brix[1]}</td><td>${v.ph[0]} – ${v.ph[1]}</td></tr>`).join('');
   return `<section class="tab" id="tab-std"><div class="card">
-    <h2>📏 มาตรฐานค่าควบคุม — Finish Product (สรุปจาก SD-RD-004 Rev.000)</h2>
-    <div class="hint">ตารางนี้เป็น "ช่วงกว้างสุดที่ครอบคลุมทุกแบรนด์" ของแต่ละสูตร ใช้เตือนเบื้องต้นในโปรแกรมเท่านั้น — ค่าจริงรายแบรนด์/รายขั้นตอน (After Grinding, Before/After Mixing, แรงดันโฮโมจีไนเซอร์) ให้เปิดไฟล์ <b>"มาตรฐานค่าควบคุมในกระบวนการผลิต.pdf"</b> ในโฟลเดอร์ 00 เสมอ</div>
-    <div class="tablewrap"><table><tr><th>สูตร</th><th>°Brix (Finish)</th><th>pH (Finish)</th></tr>${rows}</table></div>
+    <h2>📏 มาตรฐานค่าควบคุมในกระบวนการผลิต (SD-RD-04)</h2>
+    <div class="hint">ตารางมาตรฐานฉบับเต็มตาม <b>SD-RD-04 (ฉบับประกาศใช้)</b> — ครบทุกสูตร ทุกแบรนด์ และทุกขั้นตอน (บดเสร็จ / ก่อนผสม / หลังผสม / โฮโมจีไนเซอร์ / สินค้าสำเร็จรูป) • ช่องว่าง = ใช้ค่าเดียวกับแถวบนของสูตรนั้น (ตามต้นฉบับ) • เลื่อนตารางซ้าย-ขวาเพื่อดูให้ครบทุกคอลัมน์</div>
+    <style>
+      #tab-std .stdtable{border-collapse:collapse;font-size:12.5px;min-width:920px}
+      #tab-std .stdtable th,#tab-std .stdtable td{border:1px solid var(--line);padding:5px 8px;text-align:center;white-space:nowrap;vertical-align:middle}
+      #tab-std .stdtable thead th{background:var(--brand-soft);color:var(--brand-dark);line-height:1.25}
+      #tab-std .stdtable td.pn{text-align:left;font-weight:600;background:#fafcff;position:sticky;left:0;z-index:1}
+      #tab-std .stdtable thead th:first-child{position:sticky;left:0;z-index:3}
+      #tab-std .stdtable td:nth-child(2){text-align:left}
+      #tab-std .stdtable tbody tr:hover{background:#f1f8ff}
+    </style>
+    <div class="tablewrap"><table class="stdtable">
+      <thead>
+        <tr><th rowspan="2">สูตร</th><th rowspan="2">แบรนด์</th><th colspan="2">บดเสร็จ<br>After Grinding</th><th colspan="2">ก่อนผสม<br>Before Mixing</th><th colspan="2">หลังผสม<br>After Mixing</th><th colspan="2">โฮโมจีไนเซอร์<br>Homogenizer</th><th colspan="2">สินค้าสำเร็จรูป<br>Finish</th></tr>
+        <tr><th>°Brix</th><th>pH</th><th>°Brix</th><th>pH</th><th>°Brix</th><th>pH</th><th>psi</th><th>Mpa</th><th>°Brix</th><th>pH</th></tr>
+      </thead>
+      <tbody>
+<tr><td class='pn'>นมถั่วเหลือง สูตรน้ำตาลน้อย</td><td>ทุกแบรนด์</td><td>8.0 - 9.0</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>7.5 - 9.0</td><td>6.4 - 6.8</td><td>4,000</td><td>28</td><td>7.5 - 9.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรน้ำตาลน้อย</td><td>Labansoy Ecolean</td><td>8.0 - 9.0</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>4,000</td><td>28</td><td>8.5 - 9.5</td><td>6.4 - 6.9</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรดั้งเดิม</td><td>– Labansoy,Costa, LULU, Royal Umbrella, Top saho, Thaj</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>10.5 - 12.5</td><td>6.4 - 6.8</td><td>4,000</td><td>28</td><td>10.5 - 12.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรดั้งเดิม</td><td>– BON, BOM DIA, Evermilk</td><td></td><td></td><td></td><td></td><td>11.0 - 13.0</td><td></td><td>5,000</td><td>28</td><td>11.0 - 13.5</td><td></td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรดั้งเดิม</td><td>– VMIN Soy</td><td></td><td></td><td></td><td></td><td>11.0 - 13.0</td><td></td><td>5,000</td><td>32</td><td>11.0 - 13.5</td><td></td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรดั้งเดิม</td><td>– Labansoy Ecolean</td><td></td><td></td><td></td><td></td><td>10.5 - 11.5</td><td></td><td>4,000</td><td>28</td><td>10.5 - 12.5</td><td></td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรช็อคโกแลตและมอล์ต</td><td>– Labansoy,Costa, LULU, Royal Umbrella, Top saho, Thaj, BON, BOM DIA, Evermilk</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.40 - 6.80</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>12.0 - 13.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรช็อคโกแลตและมอล์ต</td><td>– VMIN Soy</td><td></td><td></td><td>8.0 - 8.5</td><td></td><td>12.0 - 13.5</td><td></td><td>5,000</td><td>34</td><td>12.0 - 14.0</td><td></td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรมัลติเกรน</td><td>– Labansoy, Costa,Thaj, Evermilk</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>12.0 - 13.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรมัลติเกรน</td><td>– VMIN Soy</td><td></td><td></td><td></td><td></td><td>12.0 - 13.5</td><td></td><td></td><td></td><td>12.0 - 14.0</td><td></td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรธัญพืชสีดำ</td><td>ทุกแบรนด์</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>12.0 - 13.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง ผสมนมแพะ 25%</td><td>Labansoy Ecolean</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>9.0 - 10.0</td><td>6.4 - 6.9</td><td>5,000</td><td>34</td><td>9.0 - 10.0</td><td>6.4 - 6.9</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรกล้วย</td><td>ทุกแบรนด์</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>10.5 - 12.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>10.5 - 13.0</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง ผสมนมแพะ 25%</td><td>ทุกแบรนด์</td><td>8.5 - 9.0</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>12.0 - 13.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง ผสมนมโค 40%</td><td>ทุกแบรนด์</td><td>8.5 - 9.0</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>12.0 - 13.5</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง ผสมกะทิ</td><td>ทุกแบรนด์</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>11.0 - 12.5</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>11.0 - 13.0</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรดั้งเดิม</td><td>Q-soy</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>7.5 - 8.5</td><td>6.4 - 6.8</td><td>9.0 - 10.0</td><td>6.4 - 6.8</td><td>4,000</td><td>28</td><td>9.0 - 11.0</td><td>6.4 -6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลือง สูตรสตรอเบอร์รี่</td><td>Golden soy</td><td>8.0 - 9.0</td><td>6.4 - 6.8</td><td>7.5 - 9.0</td><td>6.4 - 6.8</td><td>10.5 - 11.5</td><td>6.4 - 6.8</td><td>4,000</td><td>28</td><td>10.5 - 13.0</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลืองผสมถั่วดำ สูตรดั้งเดิม</td><td>Hethy</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>8.0 -9.0</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>11.0 - 13.0</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลืองผสมถั่วดำ สูตรงาดำ</td><td>Hethy</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>8.0 -9.0</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>11.0 - 13.0</td><td>6.4 - 6.8</td></tr>
+<tr><td class='pn'>นมถั่วเหลืองผสมถั่วดำ  สูตรถั่วดำ</td><td>Hethy</td><td>8.5 - 9.5</td><td>6.4 - 6.8</td><td>8.0 -9.0</td><td>6.4 - 6.8</td><td>12.0 - 13.0</td><td>6.4 - 6.8</td><td>5,000</td><td>34</td><td>11.0 - 13.0</td><td>6.4 - 6.8</td></tr>
+      </tbody>
+    </table></div>
+    <div class="hint" style="margin-top:10px">ที่มา: SD-RD-04 มาตรฐานค่าควบคุมในกระบวนการผลิต (ฉบับประกาศใช้) — หากมาตรฐานมีการแก้ไข แจ้งเพื่ออัปเดตตารางนี้ให้ตรงกัน</div>
   </div></section>`;
 }
 
