@@ -76,7 +76,18 @@
   #printArea .lb-name{font-size:8.5pt;font-weight:700;line-height:1.12;max-height:8mm;overflow:hidden}
   #printArea .lb-row{font-size:7.5pt;line-height:1.35}
   #printArea .lb-code{font-size:6.5pt;color:#444;margin-top:0.4mm}
-  /* ---- ฟอร์ม FM-RD-01 (ตามต้นฉบับ) ---- */
+/* ---- Label แนวตั้งยาวสำหรับเครื่องปริ้นความร้อน 57mm (Peripage/Paperang/Mdudu) ---- */
+  #printArea .thermalsheet{width:57mm}
+  #printArea .tlb{width:57mm;height:30mm;box-sizing:border-box;padding:1.5mm 4.5mm;color:#000;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    page-break-inside:avoid;break-inside:avoid;font-family:'Segoe UI',Tahoma,'Leelawadee UI',sans-serif}
+  #printArea .tlb-hd{display:flex;align-items:center;justify-content:center;gap:1.5mm;width:100%;
+    border-bottom:0.3mm solid #000;padding-bottom:0.6mm;margin-bottom:0.8mm}
+  #printArea .tlb-co{font-size:6pt;font-weight:700;white-space:nowrap}
+  #printArea .tlb-name{font-size:10pt;font-weight:800;line-height:1.1;max-height:9mm;overflow:hidden;width:100%}
+  #printArea .tlb-row{font-size:8.5pt;font-weight:600;line-height:1.35}
+  #printArea .tlb-code{font-size:7.5pt;margin-top:0.3mm}
+    /* ---- ฟอร์ม FM-RD-01 (ตามต้นฉบับ) ---- */
   #printArea .fm{font-family:'Segoe UI',Tahoma,'Leelawadee UI',sans-serif;color:#000;font-size:9.5pt}
   #printArea .fm-top{display:flex;justify-content:space-between;font-size:8.5pt;margin-bottom:2mm}
   #printArea .fm-hd{width:100%;border-collapse:collapse;margin-bottom:2mm}
@@ -1562,27 +1573,51 @@ function fgPickRd(reg){
     const dt=document.getElementById('f-fg-date'); if(dt&&rd.date) dt.value=rd.date;   // วันที่ผลิต = วันที่ของ RD
   }
 }
+/* ตั้งค่าขนาดหน้ากระดาษพิมพ์แบบไดนามิก (A4 หรือ ม้วนความร้อน 57mm) — ล้างอัตโนมัติหลังพิมพ์ */
+function setPageStyle(css){
+  let s=document.getElementById('dynPage');
+  if(!s){ s=document.createElement('style'); s.id='dynPage'; document.head.appendChild(s); }
+  s.textContent=css||'';
+}
+window.addEventListener('afterprint',function(){ setPageStyle(''); });
+
 function printLabel(id){
   const r=state.fg.find(function(x){return x._id===id;}); if(!r) return;
   if(!r.nameTh){ alert('ยังไม่มีชื่อสินค้า'); return; }
+  const layout=prompt('เลือกรูปแบบพิมพ์ label:\n  1 = กระดาษ A4 (หลายดวงต่อหน้า)\n  2 = เครื่องปริ้นความร้อน 57mm แนวตั้งยาว (Peripage/Paperang/Mdudu)\n\nพิมพ์ 1 หรือ 2','2');
+  if(layout===null) return;
+  const thermal = layout.trim().charAt(0)==='2';
   const months=parseInt(r.shelfMonths)||12;
   const mfg=r.date||todayISO();                 // วันที่ผลิต = วันที่ของ RD ต้นทาง
   const exp=addMonths(mfg,months);
   const def=parseInt(r.producedQty)||12;
-  const ans=prompt('พิมพ์ label กี่ดวง? (1 หน้า A4 ได้ 36 ดวง)\nปล่อยว่าง = ตามจำนวนที่ผลิต ('+def+')','');
+  const ans=prompt('พิมพ์ label กี่ดวง?'+(thermal?' (เรียงแนวตั้งต่อกันบนม้วน)':' (1 หน้า A4 ได้ 36 ดวง)')+'\nปล่อยว่าง = ตามจำนวนที่ผลิต ('+def+')','');
   let n=(ans===null)?null:(ans.trim()===''?def:parseInt(ans));
   if(n===null) return;
   if(isNaN(n)||n<1) n=1; if(n>200) n=200;
-  const one=`<div class="lb">
-      <div class="lb-hd">${companyLogo(3.4)}<span class="lb-co">TOIYIBUN FOODS CO., LTD.</span></div>
-      <div class="lb-body">
-        <div class="lb-name">${esc(r.nameTh)}</div>
-        <div class="lb-row">MFG : ${thDate(mfg)}</div>
-        <div class="lb-row">EXP : <b>${thDate(exp)}</b></div>
-        <div class="lb-code">${esc(r.code)}</div>
-      </div>
-    </div>`;
-  document.getElementById('printArea').innerHTML='<div class="labelsheet">'+one.repeat(n)+'</div>';
+  if(thermal){
+    const one=`<div class="tlb">
+        <div class="tlb-hd">${companyLogo(4)}<span class="tlb-co">TOIYIBUN FOODS CO., LTD.</span></div>
+        <div class="tlb-name">${esc(r.nameTh)}</div>
+        <div class="tlb-row">MFG : ${thDate(mfg)}</div>
+        <div class="tlb-row">EXP : <b>${thDate(exp)}</b></div>
+        <div class="tlb-code">${esc(r.code)}</div>
+      </div>`;
+    document.getElementById('printArea').innerHTML='<div class="thermalsheet">'+one.repeat(n)+'</div>';
+    setPageStyle('@page{size:57mm auto;margin:0}');
+  }else{
+    const one=`<div class="lb">
+        <div class="lb-hd">${companyLogo(3.4)}<span class="lb-co">TOIYIBUN FOODS CO., LTD.</span></div>
+        <div class="lb-body">
+          <div class="lb-name">${esc(r.nameTh)}</div>
+          <div class="lb-row">MFG : ${thDate(mfg)}</div>
+          <div class="lb-row">EXP : <b>${thDate(exp)}</b></div>
+          <div class="lb-code">${esc(r.code)}</div>
+        </div>
+      </div>`;
+    document.getElementById('printArea').innerHTML='<div class="labelsheet">'+one.repeat(n)+'</div>';
+    setPageStyle('');
+  }
   window.print();
 }
 
