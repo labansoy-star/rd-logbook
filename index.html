@@ -350,26 +350,20 @@ const REGS = {
   },
   rm: {
     title:'ทะเบียนวัตถุดิบ (SD-RD-12)', codePrefix:'RM', yearly:false,
-    hint:'★ ของมาแล้วอย่าลืมลอง: ซัพพลายเออร์ส่งของมา → ลงทันที ตั้งสถานะ "รับตัวอย่างแล้ว-รอทดลอง" + ใส่กำหนดต้องทดลอง • แดชบอร์ดจะเตือนของค้างลองและเซอร์ใกล้หมดอายุ • ไฟล์ COA/ฮาลาลเก็บในโฟลเดอร์ย่อยของ 03',
+    hint:'★ ของมาแล้วอย่าลืมลอง: ซัพพลายเออร์ส่งของมา → ลงทันที ตั้งสถานะ "รับตัวอย่างแล้ว-รอทดลอง" • "โค้ด/ล็อตซัพพลายเออร์" เพิ่มได้หลายรอบ (ครั้งที่ 1, 2, …) ตามที่ซัพส่งตัวอย่างมา • ใบรับรอง (COA/ฮาลาล/GMP ฯลฯ) แนบเป็นไฟล์ที่ด้านล่างฟอร์ม',
     fields:[
       {k:'code',    l:'รหัสวัตถุดิบ (RM)', type:'code'},
       {k:'nameTh',  l:'ชื่อวัตถุดิบ'},
       {k:'type',    l:'ประเภท', type:'select', opt:RM_TYPES},
       {k:'supplier',l:'ซัพพลายเออร์'},
-      {k:'supplierCode',l:'โค้ด/ล็อตจากซัพพลายเออร์'},
       {k:'allergen',l:'สารก่อภูมิแพ้', type:'select', opt:ALLERGENS},
       {k:'status',  l:'สถานะการทดลอง', type:'select', opt:RM_STATUS},
       {k:'receivedQty',l:'ปริมาณรับเข้า (สต็อก)', type:'number', step:'0.01'},
       {k:'stockUnit',l:'หน่วยสต็อก', type:'select', opt:STOCK_UNITS},
       {k:'received',l:'วันที่รับตัวอย่าง', type:'date'},
-      {k:'coa',     l:'COA', type:'select', opt:YNW},
-      {k:'coaExp',  l:'วันหมดอายุ COA', type:'date'},
-      {k:'halal',   l:'ใบรับรองฮาลาล', type:'select', opt:YNWX},
-      {k:'halalExp',l:'วันหมดอายุฮาลาล', type:'date'},
-      {k:'certs',   l:'ใบรับรองอื่นๆ (GMP/HACCP/ISO)'},
       {k:'note',    l:'หมายเหตุ'},
     ],
-    cols:['code','nameTh','type','supplier','supplierCode','status','_stock','received','coaExp','halalExp'],
+    cols:['code','nameTh','type','supplier','_lots','status','_stock','received','_certfiles'],
   },
   fg: {
     title:'ทะเบียนสินค้าสำเร็จรูป FG (SD-RD-13)', codePrefix:'FG', yearly:true,
@@ -566,6 +560,82 @@ function isItemsOf(r){
   return [];
 }
 function isRM_(t){ return t==='วัตถุดิบ (RM)'; }
+
+/* ================= RM: โค้ด/ล็อตจากซัพพลายเออร์ (หลายรอบตัวอย่าง) ================= */
+let rmLots = [];
+function rmLotsEditorHTML(){
+  return `<div class="card" style="margin-top:12px;background:#f8fafc">
+    <h2 style="font-size:15px">🏷️ โค้ด/ล็อตจากซัพพลายเออร์ (เพิ่มได้หลายรอบตัวอย่าง)</h2>
+    <div class="hint">ซัพส่งตัวอย่างมาหลายครั้ง กด "＋ เพิ่มรอบตัวอย่าง" บันทึกแต่ละครั้ง (ครั้งที่ / โค้ด-ล็อต / วันที่ได้รับ) — จัดซื้ออ้างอิงได้ว่าเป็นตัวอย่างรอบไหน</div>
+    <div class="tablewrap"><table id="rmlot-table"></table></div>
+    <button class="btn ghost small" type="button" onclick="rmLotAdd()">＋ เพิ่มรอบตัวอย่าง</button>
+  </div>`;
+}
+function renderRmLots(){
+  const t=document.getElementById('rmlot-table'); if(!t) return;
+  const head='<tr><th style="width:80px">ครั้งที่</th><th>โค้ด/ล็อต</th><th style="width:150px">วันที่ได้รับ</th><th></th></tr>';
+  const body=rmLots.map(function(l,i){
+    return '<tr>'
+      +'<td><input type="number" min="1" style="width:64px" value="'+esc(l.round||'')+'" oninput="rmLotSet('+i+',\'round\',this.value)"></td>'
+      +'<td><input type="text" style="width:100%;min-width:140px" value="'+esc(l.code||'')+'" oninput="rmLotSet('+i+',\'code\',this.value)"></td>'
+      +'<td><input type="date" value="'+esc(l.date||'')+'" onchange="rmLotSet('+i+',\'date\',this.value)"></td>'
+      +'<td><button class="btn danger small" type="button" onclick="rmLotDel('+i+')">ลบ</button></td></tr>';
+  }).join('');
+  t.innerHTML=head+(body||'<tr><td colspan="4" style="text-align:center;color:var(--muted)">— ยังไม่มีข้อมูล กด "＋ เพิ่มรอบตัวอย่าง" —</td></tr>');
+}
+function rmLotAdd(){ var nx=rmLots.reduce(function(m,l){return Math.max(m,parseInt(l.round)||0);},0)+1; rmLots.push({round:nx,code:'',date:todayISO()}); renderRmLots(); }
+function rmLotDel(i){ rmLots.splice(i,1); renderRmLots(); }
+function rmLotSet(i,field,val){ rmLots[i][field]=val; }
+
+/* ================= RM: ไฟล์ใบรับรอง (Supabase Storage bucket "certs") ================= */
+let rmCertFiles = [];      // [{name, path, url}]
+function rmCertEditorHTML(){
+  return `<div class="card" style="margin-top:12px;background:#f8fafc">
+    <h2 style="font-size:15px">📎 ไฟล์ใบรับรอง (COA / ฮาลาล / GMP / HACCP / ISO ฯลฯ)</h2>
+    <div class="hint">แนบไฟล์ PDF หรือรูป — เก็บบนคลาวด์ (Supabase Storage) ไม่ถ่วงระบบ • เลือกได้หลายไฟล์พร้อมกัน</div>
+    <div id="rmcert-list" style="margin:8px 0"></div>
+    <input type="file" id="rmcert-input" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" style="display:none" onchange="rmCertUpload(this.files)">
+    <button class="btn ghost small" type="button" onclick="document.getElementById('rmcert-input').click()">＋ แนบไฟล์ใบรับรอง</button>
+    <span id="rmcert-status" style="margin-left:10px;color:var(--muted);font-size:13px"></span>
+  </div>`;
+}
+function renderRmCerts(){
+  const el=document.getElementById('rmcert-list'); if(!el) return;
+  if(!rmCertFiles.length){ el.innerHTML='<span style="color:var(--muted);font-size:13px">— ยังไม่มีไฟล์แนบ —</span>'; return; }
+  el.innerHTML=rmCertFiles.map(function(f,i){
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
+      +'<a href="'+esc(f.url)+'" target="_blank" rel="noopener" style="flex:1">📎 '+esc(f.name)+'</a>'
+      +'<button class="btn danger small" type="button" onclick="rmCertDel('+i+')">นำออก</button></div>';
+  }).join('');
+}
+function rmCertDel(i){ rmCertFiles.splice(i,1); renderRmCerts(); }
+function sanitizeName(n){ return (n||'file').normalize('NFC').replace(/[^\w.\-]+/g,'_').replace(/_+/g,'_').slice(-80); }
+async function rmCertUpload(files){
+  if(!files||!files.length) return;
+  const st=document.getElementById('rmcert-status');
+  const codeEl=document.getElementById('f-rm-code');
+  const folder=(codeEl&&codeEl.value?sanitizeName(codeEl.value):'rm')||'rm';
+  for(const file of files){
+    const key=folder+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,7)+'_'+sanitizeName(file.name);
+    if(st) st.textContent='กำลังอัปโหลด '+file.name+' …';
+    try{
+      const res=await fetch(sbBase()+'/storage/v1/object/certs/'+encodeURI(key),{
+        method:'POST',
+        headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY),'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+        body:file
+      });
+      if(!res.ok){ const t=await res.text(); throw new Error(res.status+' '+t); }
+      rmCertFiles.push({name:file.name, path:key, url:sbBase()+'/storage/v1/object/public/certs/'+encodeURI(key)});
+      renderRmCerts();
+      if(st) st.textContent='อัปโหลดแล้ว ✓';
+    }catch(e){
+      if(st){ st.style.color='var(--bad)'; st.textContent='อัปโหลดไม่สำเร็จ: '+(e.message||e); }
+      alert('อัปโหลดไฟล์ไม่สำเร็จ: '+(e.message||e)+'\n\n(ถ้าเพิ่งสร้างระบบ ตรวจว่าได้สร้าง bucket "certs" ใน Supabase แล้ว)');
+      break;
+    }
+  }
+  document.getElementById('rmcert-input').value='';
+}
 function isItemsEditorHTML(){
   return `<div class="card" style="margin-top:12px;background:#f8fafc">
     <h2 style="font-size:15px">📦 รายการที่เบิก (ใบเบิกใบเดียว เบิกได้หลายอย่าง)</h2>
@@ -968,6 +1038,7 @@ function buildRegTab(reg){
       </div>
       <div id="stdwarn-${reg}" class="stdhint"></div>
       ${reg==='rd' ? batchEditorHTML() : ''}
+      ${reg==='rm' ? rmLotsEditorHTML() + rmCertEditorHTML() : ''}
       ${reg==='is' ? isItemsEditorHTML() : ''}
       ${reg==='sl' ? tastingEditorHTML() : ''}
       <div class="btnrow">
@@ -1015,6 +1086,7 @@ function clearForm(reg){
   if(reg==='rd'){ rdBatch={fid:'',fname:'',vol:'',lines:[]}; renderBatchEditor(); }
   if(reg==='sl'){ slTastings=[]; renderTastingEditor(); }
   if(reg==='is'){ isItems=[]; renderIsItems(); }
+  if(reg==='rm'){ rmLots=[]; renderRmLots(); rmCertFiles=[]; renderRmCerts(); }
 }
 function genCode(reg){
   const el=document.getElementById(`f-${reg}-code`); if(el) el.value=nextCode(reg);
@@ -1042,6 +1114,11 @@ function saveEntry(reg){
     delete o.itemType; delete o.sampleCode; delete o.name; delete o.qty; delete o.unit;   // ล้างช่องแบบเก่า
   }
   if(reg==='sl') o.tastings=JSON.parse(JSON.stringify(slTastings)).filter(t=>t.date||t.result||t.brix||t.ph||t.note);
+  if(reg==='rm'){
+    o.lots=JSON.parse(JSON.stringify(rmLots)).filter(l=>l.code||l.date);   // โค้ด/ล็อตหลายรอบ
+    o.certFiles=JSON.parse(JSON.stringify(rmCertFiles));                    // ไฟล์ใบรับรอง (Storage)
+    delete o.supplierCode; delete o.coa; delete o.coaExp; delete o.halal; delete o.halalExp; delete o.certs;
+  }
   const need = REGS[reg].codePrefix ? 'code' : 'sampleCode';
   if(!o[need]){ alert('กรุณากรอก '+(REGS[reg].codePrefix?'รหัส/เลขที่เอกสาร':'รหัสตัวอย่าง')); return; }
   // กันรหัสซ้ำ (เฉพาะทะเบียนที่มีรหัสเป็นหลัก)
@@ -1065,6 +1142,7 @@ function editEntry(reg,id){
   if(reg==='rd'){ rdBatch=row.batch?JSON.parse(JSON.stringify(row.batch)):{fid:'',fname:'',vol:'',lines:[]}; if(!rdBatch.lines)rdBatch.lines=[]; renderBatchEditor(); }
   if(reg==='is'){ isItems=JSON.parse(JSON.stringify(isItemsOf(row))); renderIsItems(); }
   if(reg==='sl'){ slTastings=row.tastings?JSON.parse(JSON.stringify(row.tastings)):[]; renderTastingEditor(); }
+  if(reg==='rm'){ rmLots=JSON.parse(JSON.stringify(supplierLotsOf(row))); renderRmLots(); rmCertFiles=Array.isArray(row.certFiles)?JSON.parse(JSON.stringify(row.certFiles)):[]; renderRmCerts(); }
   document.getElementById('savebtn-'+reg).textContent='💾 บันทึกการแก้ไข';
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -1147,7 +1225,26 @@ function markRmUsed(rmCode){
   if(r && r.status==='รับเข้า-รอทดลอง'){ r.status='เริ่มทดลองแล้ว'; return true; }
   return false;
 }
+/* โค้ด/ล็อตซัพพลายเออร์แบบหลายรอบ — รองรับข้อมูลเก่าที่เป็น supplierCode เดี่ยว */
+function supplierLotsOf(row){
+  if(row && Array.isArray(row.lots) && row.lots.length) return row.lots;
+  if(row && row.supplierCode) return [{round:1, code:row.supplierCode, date:row.received||''}];
+  return [];
+}
 function cellVal(reg,row,k){
+  if(k==='_lots'){       // โค้ด/ล็อตซัพพลายเออร์ (หลายรอบ)
+    var ls=supplierLotsOf(row);
+    if(!ls.length) return '<span style="color:var(--muted)">-</span>';
+    return ls.map(function(l){
+      return '<div style="white-space:nowrap"><span class="pill info" style="font-size:10px">ครั้งที่ '+esc(l.round||'?')+'</span> '
+        +esc(l.code||'-')+(l.date?' <span style="color:var(--muted);font-size:11px">('+thDate(l.date)+')</span>':'')+'</div>';
+    }).join('');
+  }
+  if(k==='_certfiles'){   // ไฟล์ใบรับรอง (Supabase Storage)
+    var fs=(row&&row.certFiles)||[];
+    if(!fs.length) return '<span style="color:var(--muted)">-</span>';
+    return fs.map(function(f){ return '<div style="white-space:nowrap"><a href="'+esc(f.url)+'" target="_blank" rel="noopener">📎 '+esc(f.name||'ไฟล์')+'</a></div>'; }).join('');
+  }
   if(k==='_stock'){
     var rec=parseFloat(row.receivedQty); if(isNaN(rec)) return '<span class="pill warn">ยังไม่ตั้งสต็อก</span>';
     var bal=stockBalance(row);
@@ -1185,14 +1282,8 @@ function cellVal(reg,row,k){
   }
   const f=REGS[reg].fields.find(x=>x.k===k);
   const v=row[k]||'';
-  if(f&&f.type==='date') {
-    if((k==='coaExp'||k==='halalExp') && v){
-      const d=daysFromToday(v);
-      if(d!==null && d<=60) return `<span class="pill ${d<0?'bad':'warn'}">${thDate(v)}${d<0?' (หมดอายุ!)':' (ใกล้หมด)'}</span>`;
-    }
-    return thDate(v);
-  }
-  if(k==='status'||k==='result'||k==='coa'||k==='halal'||k==='spec') return statusPill(reg,k,v);
+  if(f&&f.type==='date') return thDate(v);
+  if(k==='status'||k==='result'||k==='spec') return statusPill(reg,k,v);
   return esc(v);
 }
 function renderTable(reg){
@@ -1207,6 +1298,8 @@ function renderTable(reg){
     if(k==='_stock') return '<th>คงเหลือสต็อก</th>';
     if(k==='_fgStock') return '<th>คงเหลือในสต็อก FG</th>';
     if(k==='_items') return '<th>รายการที่เบิก</th>';
+    if(k==='_lots') return '<th>โค้ด/ล็อตซัพพลายเออร์</th>';
+    if(k==='_certfiles') return '<th>ไฟล์ใบรับรอง</th>';
     if(k==='_rdResult') return '<th>สถานะ (ตาม RD)</th>';
     const f=cfg.fields.find(x=>x.k===k); return `<th>${esc(f?f.l:k)}</th>`;
   }).join('')+'<th>จัดการ</th></tr>';
@@ -1251,10 +1344,6 @@ function renderDash(){
   const rqOpen=state.rq.filter(r=>['รับเรื่อง','กำลังพัฒนา','รอชิม/อนุมัติ'].includes(r.status)).length;
   const rdActive=state.rd.filter(r=>['กำลังพัฒนา','รอชิม'].includes(r.status)).length;
   const rmWait=state.rm.filter(r=>r.status==='รับเข้า-รอทดลอง');
-  const certSoon=state.rm.filter(r=>{
-    const d1=r.coaExp?daysFromToday(r.coaExp):null, d2=r.halalExp?daysFromToday(r.halalExp):null;
-    return (d1!==null&&d1<=60)||(d2!==null&&d2<=60);
-  });
   const slDue=state.sl.filter(r=>{
     if(r.status!=='กำลังศึกษา') return false;
     const lt=slLastTaste(r);
@@ -1266,7 +1355,6 @@ function renderDash(){
     {t:'คำขอพัฒนาที่ยังไม่ปิด',n:rqOpen,tab:'rq',cls:rqOpen?'':'ok'},
     {t:'ตัวอย่างที่กำลังพัฒนา/รอชิม',n:rdActive,tab:'rd',cls:''},
     {t:'★ วัตถุดิบรอทดลอง',n:rmWait.length,tab:'rm',cls:rmWait.length?'warn':'ok'},
-    {t:'เซอร์ใกล้หมดอายุ (≤60 วัน)',n:certSoon.length,tab:'rm',cls:certSoon.length?'warn':'ok'},
     {t:'★ วัตถุดิบสต็อกหมด',n:rmOut.length,tab:'rm',cls:rmOut.length?'bad':'ok'},
     {t:'Shelf-life ใกล้ถึง/เลยรอบชิม',n:slDue.length,tab:'sl',cls:slDue.length?'warn':'ok'},
     {t:'สินค้า FG ปีนี้ (FG-'+y+'-…)',n:state.fg.filter(r=>(r.code||'').startsWith('FG-'+y)).length,tab:'fg',cls:''},
@@ -1276,7 +1364,6 @@ function renderDash(){
 
   const li=[];
   rmWait.forEach(r=>li.push(`<span class="pill warn">รอทดลอง</span> วัตถุดิบ ${esc(r.code)} ${esc(r.nameTh)}`));
-  certSoon.forEach(r=>li.push(`<span class="pill warn">เซอร์ใกล้หมด</span> ${esc(r.code)} ${esc(r.nameTh)} — COA: ${thDate(r.coaExp)||'-'} / ฮาลาล: ${thDate(r.halalExp)||'-'}`));
   rmOut.forEach(r=>li.push(`<span class="pill bad">สต็อกหมด</span> วัตถุดิบ ${esc(r.code)} ${esc(r.nameTh)} — คงเหลือ ${stockBalance(r)} ${esc(r.stockUnit||'')}`));
   slDue.forEach(r=>{
     const _lt=slLastTaste(r); const nxt=_lt?addMonths(_lt,1):addMonths(r.start,1);
@@ -1448,7 +1535,7 @@ function wipe(){
 function exportCSV(reg){
   const cfg=REGS[reg];
   const flds=cfg.fields.filter(f=>f.type!=='section');
-  const heads=flds.map(f=>f.l).concat(reg==='rd'?['วัตถุดิบในสูตร (BOM)']:[]).concat(reg==='is'?['รายการที่เบิก']:[]);
+  const heads=flds.map(f=>f.l).concat(reg==='rd'?['วัตถุดิบในสูตร (BOM)']:[]).concat(reg==='is'?['รายการที่เบิก']:[]).concat(reg==='rm'?['โค้ด/ล็อตซัพพลายเออร์','ไฟล์ใบรับรอง']:[]);
   const rows=state[reg].map(r=>{
     let cells=flds.map(f=>{
       let v=r[f.k]||'';
@@ -1463,6 +1550,12 @@ function exportCSV(reg){
     if(reg==='is'){
       const itStr=isItemsOf(r).map(it=>(isRM_(it.itemType)?'[RM] ':'[FG] ')+it.code+' '+(it.name||'')+' '+(it.qty||'')+' '+(it.unit||'')).join(' + ');
       cells.push('"'+itStr.replace(/"/g,'""')+'"');
+    }
+    if(reg==='rm'){
+      const lotStr=supplierLotsOf(r).map(l=>'ครั้งที่'+(l.round||'?')+' '+(l.code||'')+(l.date?' ('+thDate(l.date)+')':'')).join(' + ');
+      cells.push('"'+lotStr.replace(/"/g,'""')+'"');
+      const cfStr=((r.certFiles)||[]).map(f=>f.name+': '+f.url).join(' | ');
+      cells.push('"'+cfStr.replace(/"/g,'""')+'"');
     }
     return cells.join(',');
   });
