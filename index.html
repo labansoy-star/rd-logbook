@@ -597,6 +597,18 @@ function rmCertEditorHTML(){
     <input type="file" id="rmcert-input" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" style="display:none" onchange="rmCertUpload(this.files)">
     <button class="btn ghost small" type="button" onclick="document.getElementById('rmcert-input').click()">＋ แนบไฟล์ใบรับรอง</button>
     <span id="rmcert-status" style="margin-left:10px;color:var(--muted);font-size:13px"></span>
+    <div style="border-top:1px dashed var(--line);margin-top:10px;padding-top:10px">
+      <div class="hint">📷 <b>ถ่าย/สแกนเอกสาร</b> — เปิดกล้องถ่ายทีละหน้า (ทำภาพขาว-ดำแบบสแกนเนอร์อัตโนมัติ) แล้วรวมเป็น <b>PDF ไฟล์เดียว</b> ขนาดเล็ก อัปเข้าคลาวด์</div>
+      <input type="file" id="rmscan-input" accept="image/*" capture="environment" style="display:none" onchange="rmScanAdd(this.files)">
+      <button class="btn ghost small" type="button" onclick="document.getElementById('rmscan-input').click()">📷 ถ่าย/สแกนหน้าถัดไป</button>
+      <span id="rmscan-count" style="margin-left:8px;color:var(--muted);font-size:13px"></span>
+      <div id="rmscan-thumbs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+      <div id="rmscan-actions" style="display:none;margin-top:8px">
+        <button class="btn primary small" type="button" onclick="rmScanMakePdf()">📄 รวมเป็น PDF &amp; อัปโหลด</button>
+        <button class="btn ghost small" type="button" onclick="rmScanClear()">ล้างรูปที่ถ่าย</button>
+        <span id="rmscan-status" style="margin-left:8px;color:var(--muted);font-size:13px"></span>
+      </div>
+    </div>
   </div>`;
 }
 function renderRmCerts(){
@@ -610,31 +622,136 @@ function renderRmCerts(){
 }
 function rmCertDel(i){ rmCertFiles.splice(i,1); renderRmCerts(); }
 function sanitizeName(n){ return (n||'file').normalize('NFC').replace(/[^\w.\-]+/g,'_').replace(/_+/g,'_').slice(-80); }
+function rmCertFolder(){ const codeEl=document.getElementById('f-rm-code'); return (codeEl&&codeEl.value?sanitizeName(codeEl.value):'rm')||'rm'; }
+/* อัปโหลดไฟล์/บล็อบเดียวขึ้น Supabase Storage แล้วผูกเข้า rmCertFiles */
+async function uploadCertBlob(blob, name, type){
+  const key=rmCertFolder()+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,7)+'_'+sanitizeName(name);
+  const res=await fetch(sbBase()+'/storage/v1/object/certs/'+encodeURI(key),{
+    method:'POST',
+    headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY),'Content-Type':type||blob.type||'application/octet-stream','x-upsert':'true'},
+    body:blob
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error(res.status+' '+t); }
+  rmCertFiles.push({name:name, path:key, url:sbBase()+'/storage/v1/object/public/certs/'+encodeURI(key)});
+  renderRmCerts();
+  return key;
+}
 async function rmCertUpload(files){
   if(!files||!files.length) return;
   const st=document.getElementById('rmcert-status');
-  const codeEl=document.getElementById('f-rm-code');
-  const folder=(codeEl&&codeEl.value?sanitizeName(codeEl.value):'rm')||'rm';
   for(const file of files){
-    const key=folder+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,7)+'_'+sanitizeName(file.name);
-    if(st) st.textContent='กำลังอัปโหลด '+file.name+' …';
-    try{
-      const res=await fetch(sbBase()+'/storage/v1/object/certs/'+encodeURI(key),{
-        method:'POST',
-        headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY),'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
-        body:file
-      });
-      if(!res.ok){ const t=await res.text(); throw new Error(res.status+' '+t); }
-      rmCertFiles.push({name:file.name, path:key, url:sbBase()+'/storage/v1/object/public/certs/'+encodeURI(key)});
-      renderRmCerts();
-      if(st) st.textContent='อัปโหลดแล้ว ✓';
-    }catch(e){
+    if(st){ st.style.color='var(--muted)'; st.textContent='กำลังอัปโหลด '+file.name+' …'; }
+    try{ await uploadCertBlob(file, file.name, file.type); if(st) st.textContent='อัปโหลดแล้ว ✓'; }
+    catch(e){
       if(st){ st.style.color='var(--bad)'; st.textContent='อัปโหลดไม่สำเร็จ: '+(e.message||e); }
       alert('อัปโหลดไฟล์ไม่สำเร็จ: '+(e.message||e)+'\n\n(ถ้าเพิ่งสร้างระบบ ตรวจว่าได้สร้าง bucket "certs" ใน Supabase แล้ว)');
       break;
     }
   }
   document.getElementById('rmcert-input').value='';
+}
+
+/* ================= RM: ถ่าย/สแกนเอกสาร → รวมเป็น PDF ไฟล์เดียว (ไม่ใช้ไลบรารีภายนอก) ================= */
+let rmScanPages = [];   // [{dataURL, w, h}]
+/* ถ่าย/เลือกรูป 1 หน้า → ย่อ + ทำภาพขาว-ดำแบบสแกนเนอร์ */
+function processScanImage(file){
+  return new Promise(function(resolve,reject){
+    const img=new Image();
+    img.onload=function(){
+      try{
+        const maxEdge=1600;
+        let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        const sc=Math.min(1, maxEdge/Math.max(w,h)); w=Math.max(1,Math.round(w*sc)); h=Math.max(1,Math.round(h*sc));
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+        const id=ctx.getImageData(0,0,w,h), d=id.data;
+        const lo=70, hi=205, rng=hi-lo;   // ยืดคอนทราสต์: พื้นหลัง→ขาว ตัวหนังสือ→ดำ
+        for(let i=0;i<d.length;i+=4){
+          let g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+          g=(g-lo)/rng*255; if(g<0)g=0; else if(g>255)g=255;
+          d[i]=d[i+1]=d[i+2]=g;
+        }
+        ctx.putImageData(id,0,0);
+        URL.revokeObjectURL(img.src);
+        resolve({dataURL:c.toDataURL('image/jpeg',0.6), w:w, h:h});
+      }catch(e){ reject(e); }
+    };
+    img.onerror=function(){ reject(new Error('โหลดรูปไม่สำเร็จ')); };
+    img.src=URL.createObjectURL(file);
+  });
+}
+async function rmScanAdd(files){
+  if(!files||!files.length) return;
+  const st=document.getElementById('rmscan-status'); if(st){ st.style.color='var(--muted)'; st.textContent='กำลังประมวลผลรูป…'; }
+  try{
+    for(const f of files){ const pg=await processScanImage(f); rmScanPages.push(pg); }
+    if(st) st.textContent='';
+  }catch(e){ if(st){ st.style.color='var(--bad)'; st.textContent='ประมวลผลรูปไม่สำเร็จ: '+(e.message||e); } }
+  renderRmScan();
+  document.getElementById('rmscan-input').value='';
+}
+function renderRmScan(){
+  const cnt=document.getElementById('rmscan-count'), th=document.getElementById('rmscan-thumbs'), ac=document.getElementById('rmscan-actions');
+  if(cnt) cnt.textContent=rmScanPages.length?('ถ่ายแล้ว '+rmScanPages.length+' หน้า'):'';
+  if(ac) ac.style.display=rmScanPages.length?'block':'none';
+  if(!th) return;
+  th.innerHTML=rmScanPages.map(function(p,i){
+    return '<div style="position:relative;width:70px">'
+      +'<img src="'+p.dataURL+'" style="width:70px;height:90px;object-fit:cover;border:1px solid var(--line);border-radius:4px">'
+      +'<span style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:0 4px;border-radius:3px">'+(i+1)+'</span>'
+      +'<button class="btn danger small" type="button" style="position:absolute;top:2px;right:2px;padding:0 5px;line-height:1.4" onclick="rmScanDelPage('+i+')">✕</button>'
+      +'</div>';
+  }).join('');
+}
+function rmScanDelPage(i){ rmScanPages.splice(i,1); renderRmScan(); }
+function rmScanClear(){ rmScanPages=[]; renderRmScan(); const st=document.getElementById('rmscan-status'); if(st) st.textContent=''; }
+/* แปลง dataURL(JPEG) → ไบต์ */
+function jpegBytes(dataURL){ const bin=atob(dataURL.split(',')[1]||''); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i); return u; }
+/* ประกอบ PDF หลายหน้าจากรูป JPEG เอง (Filter=DCTDecode ฝัง JPEG ตรง ๆ ขนาดเล็ก) */
+function buildScanPdf(pages){
+  const A4=[595.28,841.89];
+  const enc=function(s){ const b=new Uint8Array(s.length); for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i)&0xff; return b; };
+  const chunks=[]; let offset=0;
+  function push(bytes){ chunks.push(bytes); offset+=bytes.length; }
+  function pushStr(s){ push(enc(s)); }
+  const N=pages.length, totalObjs=2+N*3, off=new Array(totalObjs+1).fill(0);
+  function beginObj(n){ off[n]=offset; pushStr(n+' 0 obj\n'); }
+  function endObj(){ pushStr('endobj\n'); }
+  pushStr('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  beginObj(1); pushStr('<< /Type /Catalog /Pages 2 0 R >>\n'); endObj();
+  const kids=pages.map(function(_,k){ return (5+k*3)+' 0 R'; }).join(' ');
+  beginObj(2); pushStr('<< /Type /Pages /Kids ['+kids+'] /Count '+N+' >>\n'); endObj();
+  pages.forEach(function(pg,k){
+    const imgN=3+k*3, conN=4+k*3, pgN=5+k*3, jpg=jpegBytes(pg.dataURL);
+    const sc=Math.min(A4[0]/pg.w, A4[1]/pg.h), dw=pg.w*sc, dh=pg.h*sc, x=(A4[0]-dw)/2, y=(A4[1]-dh)/2;
+    beginObj(imgN);
+    pushStr('<< /Type /XObject /Subtype /Image /Width '+pg.w+' /Height '+pg.h+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+jpg.length+' >>\nstream\n');
+    push(jpg); pushStr('\nendstream\n'); endObj();
+    const content='q\n'+dw.toFixed(2)+' 0 0 '+dh.toFixed(2)+' '+x.toFixed(2)+' '+y.toFixed(2)+' cm\n/Im0 Do\nQ\n';
+    beginObj(conN); pushStr('<< /Length '+content.length+' >>\nstream\n'+content+'endstream\n'); endObj();
+    beginObj(pgN); pushStr('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+A4[0]+' '+A4[1]+'] /Resources << /XObject << /Im0 '+imgN+' 0 R >> >> /Contents '+conN+' 0 R >>\n'); endObj();
+  });
+  const xrefOff=offset;
+  pushStr('xref\n0 '+(totalObjs+1)+'\n0000000000 65535 f \n');
+  for(let i=1;i<=totalObjs;i++){ pushStr(('0000000000'+off[i]).slice(-10)+' 00000 n \n'); }
+  pushStr('trailer\n<< /Size '+(totalObjs+1)+' /Root 1 0 R >>\nstartxref\n'+xrefOff+'\n%%EOF');
+  let total=0; chunks.forEach(function(c){ total+=c.length; });
+  const out=new Uint8Array(total); let p=0; chunks.forEach(function(c){ out.set(c,p); p+=c.length; });
+  return new Blob([out],{type:'application/pdf'});
+}
+async function rmScanMakePdf(){
+  if(!rmScanPages.length) return;
+  const st=document.getElementById('rmscan-status'); if(st){ st.style.color='var(--muted)'; st.textContent='กำลังสร้าง PDF & อัปโหลด…'; }
+  try{
+    const blob=buildScanPdf(rmScanPages);
+    const name='scan_'+rmCertFolder()+'_'+Date.now()+'.pdf';
+    await uploadCertBlob(blob, name, 'application/pdf');
+    rmScanClear();
+    if(st){ st.style.color='var(--muted)'; st.textContent='อัปโหลด PDF แล้ว ✓ ('+Math.round(blob.size/1024)+' KB)'; }
+  }catch(e){
+    if(st){ st.style.color='var(--bad)'; st.textContent='ทำ PDF ไม่สำเร็จ: '+(e.message||e); }
+    alert('สร้าง/อัปโหลด PDF ไม่สำเร็จ: '+(e.message||e)+'\n\n(ตรวจว่าได้สร้าง bucket "certs" ใน Supabase แล้ว)');
+  }
 }
 function isItemsEditorHTML(){
   return `<div class="card" style="margin-top:12px;background:#f8fafc">
@@ -1086,7 +1203,7 @@ function clearForm(reg){
   if(reg==='rd'){ rdBatch={fid:'',fname:'',vol:'',lines:[]}; renderBatchEditor(); }
   if(reg==='sl'){ slTastings=[]; renderTastingEditor(); }
   if(reg==='is'){ isItems=[]; renderIsItems(); }
-  if(reg==='rm'){ rmLots=[]; renderRmLots(); rmCertFiles=[]; renderRmCerts(); }
+  if(reg==='rm'){ rmLots=[]; renderRmLots(); rmCertFiles=[]; renderRmCerts(); rmScanPages=[]; renderRmScan(); }
 }
 function genCode(reg){
   const el=document.getElementById(`f-${reg}-code`); if(el) el.value=nextCode(reg);
@@ -1142,7 +1259,7 @@ function editEntry(reg,id){
   if(reg==='rd'){ rdBatch=row.batch?JSON.parse(JSON.stringify(row.batch)):{fid:'',fname:'',vol:'',lines:[]}; if(!rdBatch.lines)rdBatch.lines=[]; renderBatchEditor(); }
   if(reg==='is'){ isItems=JSON.parse(JSON.stringify(isItemsOf(row))); renderIsItems(); }
   if(reg==='sl'){ slTastings=row.tastings?JSON.parse(JSON.stringify(row.tastings)):[]; renderTastingEditor(); }
-  if(reg==='rm'){ rmLots=JSON.parse(JSON.stringify(supplierLotsOf(row))); renderRmLots(); rmCertFiles=Array.isArray(row.certFiles)?JSON.parse(JSON.stringify(row.certFiles)):[]; renderRmCerts(); }
+  if(reg==='rm'){ rmLots=JSON.parse(JSON.stringify(supplierLotsOf(row))); renderRmLots(); rmCertFiles=Array.isArray(row.certFiles)?JSON.parse(JSON.stringify(row.certFiles)):[]; renderRmCerts(); rmScanPages=[]; renderRmScan(); }
   document.getElementById('savebtn-'+reg).textContent='💾 บันทึกการแก้ไข';
   window.scrollTo({top:0,behavior:'smooth'});
 }
