@@ -753,6 +753,88 @@ async function rmScanMakePdf(){
     alert('สร้าง/อัปโหลด PDF ไม่สำเร็จ: '+(e.message||e)+'\n\n(ตรวจว่าได้สร้าง bucket "certs" ใน Supabase แล้ว)');
   }
 }
+/* ================= RM: นำเข้าหลายรายการจากข้อความ (paste → auto code + เช็คซ้ำ) ================= */
+let rmImportRows = [];
+function rmTypeResolve(t){
+  t=(t||'').trim(); if(!t) return '';
+  if(RM_TYPES.indexOf(t)>=0) return t;
+  const map=[['กลิ่น','สารแต่งกลิ่น'],['สี','สารแต่งสี'],['หวาน','น้ำตาล/สารให้ความหวาน'],['น้ำตาล','น้ำตาล/สารให้ความหวาน'],['คงตัว','สารคงตัว/อิมัลซิไฟเออร์'],['อิมัล','สารคงตัว/อิมัลซิไฟเออร์'],['วิตามิน','วิตามิน/แร่ธาตุ'],['แร่','วิตามิน/แร่ธาตุ'],['กันเสีย','สารกันเสีย'],['เกลือ','เกลือ/สารปรุงรส'],['ปรุงรส','เกลือ/สารปรุงรส'],['บรรจุ','บรรจุภัณฑ์'],['นม','นมผง/ผลิตภัณฑ์นม'],['ถั่ว','ถั่วเหลือง/เมล็ดธัญพืช'],['ธัญ','ถั่วเหลือง/เมล็ดธัญพืช'],['เมล็ด','ถั่วเหลือง/เมล็ดธัญพืช'],['โปรตีน','ถั่วเหลือง/เมล็ดธัญพืช']];
+  for(var i=0;i<map.length;i++){ if(t.indexOf(map[i][0])>=0) return map[i][1]; }
+  return '';
+}
+function rmUnitResolve(u){
+  u=(u||'').trim(); if(!u) return '';
+  if(STOCK_UNITS.indexOf(u)>=0) return u;
+  const L=u.toLowerCase();
+  if(u.indexOf('กก')>=0||u.indexOf('กิโล')>=0||L==='kg') return 'กก.';
+  if(u.indexOf('มล')>=0||L==='ml') return 'มล.';
+  if(u.indexOf('ลิตร')>=0||L==='l'||L==='ltr') return 'ลิตร';
+  if(u.indexOf('กรัม')>=0||u.indexOf('ก.')>=0||u==='ก'||L==='g'||L==='gram'||L==='grams') return 'กรัม';
+  if(u.indexOf('ขวด')>=0) return 'ขวด';
+  if(u.indexOf('ถุง')>=0||L==='bag'||L==='sachet') return 'ถุง';
+  if(u.indexOf('ลัง')>=0) return 'ลัง';
+  return '';
+}
+function rmParseLine(line){
+  const p=line.split(/\t|\|/).map(function(s){return s.trim();});
+  return { name:p[0]||'', type:rmTypeResolve(p[1]||''), typeRaw:p[1]||'', supplier:p[2]||'', lot:p[3]||'', qty:p[4]||'', unit:rmUnitResolve(p[5]||''), note:p[6]||'', code:'', dup:'' };
+}
+function rmImportEditorHTML(){
+  return `<div class="card" style="margin-top:16px;background:#f8fafc">
+    <h2 style="font-size:15px">📋 นำเข้าวัตถุดิบหลายรายการจากข้อความ</h2>
+    <div class="hint">วางข้อความทีละบรรทัด คั่นด้วย <b>|</b> หรือวางจาก Excel (คั่นด้วย Tab) ก็ได้ • รูปแบบ: <code>ชื่อ | ประเภท | ซัพพลายเออร์ | โค้ด/ล็อต | น้ำหนัก | หน่วย | หมายเหตุ</code> • ใส่แค่ "ชื่อ" อย่างเดียวก็ได้ ที่เหลือเว้นว่าง • ระบบออกรหัส RM ให้อัตโนมัติ + เช็คชื่อซ้ำ + สถานะเว้นว่าง</div>
+    <textarea id="rm-import-text" rows="5" style="width:100%;font-family:monospace;font-size:13px" placeholder="Guava Flavour | สารแต่งกลิ่น | Vicchi | JJ-03000 | 20 | กรัม | ตัวอย่าง&#10;Taro Powder | เมล็ดธัญพืช | Unify | | 100 | กรัม |"></textarea>
+    <div class="btnrow" style="margin-top:8px"><button class="btn ghost" type="button" onclick="rmImportPreview()">🔍 ตรวจ + พรีวิว</button></div>
+    <div id="rm-import-preview" style="margin-top:10px"></div>
+  </div>`;
+}
+function rmImportPreview(){
+  const ta=document.getElementById('rm-import-text'); if(!ta) return;
+  const lines=ta.value.split(/\r?\n/); const rows=[];
+  lines.forEach(function(ln,idx){
+    if(!ln.trim()) return;
+    if(idx===0 && ln.indexOf('ชื่อ')>=0 && (ln.indexOf('ประเภท')>=0||ln.indexOf('ซัพ')>=0)) return;  // ข้ามหัวตาราง
+    const r=rmParseLine(ln); if(!r.name) return; rows.push(r);
+  });
+  rmImportRows=rows; rmImportRender();
+}
+function rmImportNextBase(){ var mx=0; state.rm.forEach(function(r){ var m=(r.code||'').match(/^RM-(\d+)$/); if(m) mx=Math.max(mx,parseInt(m[1])); }); return mx; }
+function rmImportRender(){
+  const box=document.getElementById('rm-import-preview'); if(!box) return;
+  if(!rmImportRows.length){ box.innerHTML='<div style="color:var(--muted);font-size:13px">— ยังไม่มีรายการ วางข้อความแล้วกด "ตรวจ + พรีวิว" —</div>'; return; }
+  const base=rmImportNextBase();
+  const exist=state.rm.map(function(r){ return {code:r.code, n:(r.nameTh||'').trim().toLowerCase()}; });
+  var html='<div class="tablewrap"><table><tr><th>รหัส</th><th>ชื่อ</th><th>ประเภท</th><th>ซัพ</th><th>ล็อต</th><th>จำนวน</th><th>หมายเหตุ</th><th>ตรวจซ้ำ</th><th></th></tr>';
+  rmImportRows.forEach(function(r,i){
+    r.code='RM-'+pad3(base+1+i);
+    var hit=exist.find(function(e){ return e.n && e.n===r.name.trim().toLowerCase(); });
+    r.dup=hit?hit.code:'';
+    var typeCell=r.type?esc(r.type):'<span style="color:var(--muted)">(ไม่ระบุ)</span>';
+    var dupCell=hit?'<span class="pill warn">คล้าย '+esc(hit.code)+'</span>':'<span class="pill ok">ใหม่</span>';
+    html+='<tr><td style="font-family:monospace;white-space:nowrap">'+r.code+'</td><td>'+esc(r.name)+'</td><td>'+typeCell+'</td><td>'+esc(r.supplier)+'</td><td>'+esc(r.lot)+'</td><td style="white-space:nowrap">'+esc(r.qty)+' '+esc(r.unit)+'</td><td style="max-width:150px;font-size:12px;color:var(--muted)">'+esc(r.note)+'</td><td>'+dupCell+'</td><td><button class="btn danger small" type="button" onclick="rmImportDelRow('+i+')">ลบ</button></td></tr>';
+  });
+  html+='</table></div>';
+  var dupN=rmImportRows.filter(function(r){return r.dup;}).length;
+  html+='<div class="btnrow" style="margin-top:10px"><button class="btn primary" type="button" onclick="rmImportCommit()">✅ เพิ่มทั้งหมด ('+rmImportRows.length+' รายการ)</button><button class="btn ghost" type="button" onclick="rmImportClear()">ล้าง</button>'+(dupN?'<span style="margin-left:10px;color:var(--muted);font-size:13px">⚠ มี '+dupN+' รายการคล้ายของเดิม — ตรวจก่อนเพิ่ม</span>':'')+'</div>';
+  box.innerHTML=html;
+}
+function rmImportDelRow(i){ rmImportRows.splice(i,1); rmImportRender(); }
+function rmImportClear(){ rmImportRows=[]; var ta=document.getElementById('rm-import-text'); if(ta) ta.value=''; rmImportRender(); }
+async function rmImportCommit(){
+  if(!rmImportRows.length) return;
+  var dupN=rmImportRows.filter(function(r){return r.dup;}).length;
+  if(!confirm('เพิ่มวัตถุดิบ '+rmImportRows.length+' รายการ'+(dupN?(' (มี '+dupN+' รายการคล้ายของเดิม)'):'')+' ?\nสถานะจะเว้นว่างไว้')) return;
+  var base=rmImportNextBase(); var added=[];
+  rmImportRows.forEach(function(r,i){
+    var q=(r.qty!==''&&!isNaN(parseFloat(r.qty)))?parseFloat(r.qty):'';
+    var o={ code:'RM-'+pad3(base+1+i), nameTh:r.name, type:r.type||'', supplier:r.supplier||'', allergen:'', status:'', receivedQty:q, stockUnit:r.unit||'', received:'', note:r.note||'', lots:r.lot?[{round:1,code:r.lot,date:''}]:[], certFiles:[] };
+    o._id=uid(); state.rm.push(o); added.push(o.code);
+  });
+  rmImportRows=[]; var ta=document.getElementById('rm-import-text'); if(ta) ta.value='';
+  rmImportRender(); renderTable('rm');
+  const rr=save(); await (rr&&rr.then?rr:new Promise(function(res){setTimeout(res,3500);}));
+  alert('เพิ่มแล้ว '+added.length+' รายการ ('+added[0]+' – '+added[added.length-1]+')\nสถานะเว้นว่างไว้ — เปิดแก้/แนบไฟล์เพิ่มได้ภายหลัง');
+}
 function isItemsEditorHTML(){
   return `<div class="card" style="margin-top:12px;background:#f8fafc">
     <h2 style="font-size:15px">📦 รายการที่เบิก (ใบเบิกใบเดียว เบิกได้หลายอย่าง)</h2>
@@ -1165,6 +1247,7 @@ function buildRegTab(reg){
       </div>
       <div class="searchrow"><label style="font-size:13px;color:var(--muted)">ค้นหา:</label><input type="text" id="search-${reg}" placeholder="พิมพ์คำค้น เช่น รหัส ชื่อสูตร ลูกค้า…" oninput="renderTable('${reg}')"></div>
       <div class="tablewrap"><table id="table-${reg}"></table></div>
+      ${reg==='rm' ? rmImportEditorHTML() : ''}
       ${reg==='rm' ? buildRmMaster() : ''}
       ${reg==='is' ? `<h2 style="margin-top:20px">📊 สรุปยอดคงเหลือตัวอย่าง (อัตโนมัติ)</h2>
       <div class="hint">ยอดผลิตดึงจากทะเบียนตัวอย่างทดลอง (RD) / จำนวนที่เบิกรวมจากทะเบียนนี้ — คงเหลือ = ผลิต − เบิก</div>
