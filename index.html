@@ -753,6 +753,100 @@ async function rmScanMakePdf(){
     alert('สร้าง/อัปโหลด PDF ไม่สำเร็จ: '+(e.message||e)+'\n\n(ตรวจว่าได้สร้าง bucket "certs" ใน Supabase แล้ว)');
   }
 }
+/* ================= RM: ถ่ายฉลาก → ให้ AI อ่านแล้วเติมฟอร์ม (ผ่าน Edge Function 'read-label') ================= */
+function rmAiFillHTML(){
+  return `<div class="card" style="margin:10px 0;background:#eff6ff;border:1px solid #bfdbfe">
+    <h2 style="font-size:15px">✨ ถ่ายฉลาก แล้วให้ AI กรอกให้</h2>
+    <div class="hint">ถ่ายรูปฉลากวัตถุดิบ 1 รูป → ระบบอ่านแล้วเติมช่องด้านล่างให้อัตโนมัติ • <b>ตรวจให้ครบก่อนกดบันทึกเสมอ</b> • ระบบจะ<b>ไม่เดา</b>สารก่อภูมิแพ้ ถ้าฉลากไม่ได้เขียนไว้ชัด</div>
+    <input type="file" id="rmai-input" accept="image/*" capture="environment" style="display:none" onchange="rmAiRead(this.files)">
+    <button class="btn primary small" type="button" onclick="document.getElementById('rmai-input').click()">📷 ถ่ายฉลาก → ให้ AI กรอก</button>
+    <span id="rmai-status" style="margin-left:10px;font-size:13px;color:var(--muted)"></span>
+    <div id="rmai-result" style="margin-top:8px"></div>
+  </div>`;
+}
+/* ย่อรูปให้เล็กแต่ยังอ่านตัวหนังสือออก (เก็บสีไว้ ช่วยให้ AI อ่านแม่นขึ้น) */
+function rmAiPrepImage(file){
+  return new Promise(function(resolve,reject){
+    const img=new Image();
+    img.onload=function(){
+      try{
+        const maxEdge=1400;
+        let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        const sc=Math.min(1,maxEdge/Math.max(w,h)); w=Math.max(1,Math.round(w*sc)); h=Math.max(1,Math.round(h*sc));
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        URL.revokeObjectURL(img.src);
+        const du=c.toDataURL('image/jpeg',0.75);
+        resolve({b64:du.split(',')[1], mime:'image/jpeg'});
+      }catch(e){ reject(e); }
+    };
+    img.onerror=function(){ reject(new Error('เปิดรูปไม่ได้')); };
+    img.src=URL.createObjectURL(file);
+  });
+}
+async function rmAiRead(files){
+  if(!files||!files.length) return;
+  const st=document.getElementById('rmai-status'), rs=document.getElementById('rmai-result');
+  if(st){ st.style.color='var(--muted)'; st.textContent='กำลังย่อรูป…'; }
+  if(rs) rs.innerHTML='';
+  try{
+    const im=await rmAiPrepImage(files[0]);
+    if(st) st.textContent='กำลังให้ AI อ่านฉลาก… (ประมาณ 5–15 วินาที)';
+    const res=await fetch(sbBase()+'/functions/v1/read-label',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY)},
+      body:JSON.stringify({image:im.b64, mime:im.mime})
+    });
+    const txt=await res.text();
+    if(!res.ok) throw new Error('('+res.status+') '+txt.slice(0,300));
+    let d; try{ d=JSON.parse(txt); }catch(e){ throw new Error('ผลลัพธ์ไม่ใช่ JSON: '+txt.slice(0,200)); }
+    if(d.error) throw new Error(d.error);
+    rmAiApply(d);
+    if(st){ st.style.color='var(--muted)'; st.textContent='อ่านเสร็จแล้ว — ตรวจข้อมูลก่อนกด "บันทึกรายการ"'; }
+  }catch(e){
+    if(st){ st.style.color='var(--bad)'; st.textContent='ไม่สำเร็จ: '+(e.message||e); }
+  }
+  const inp=document.getElementById('rmai-input'); if(inp) inp.value='';
+}
+function rmAiApply(d){
+  const rows=[];
+  function put(label,key,val){
+    val=(val===null||val===undefined)?'':String(val).trim();
+    const el=document.getElementById('f-rm-'+key);
+    if(!el||!val){ rows.push([label,val,val?'ไม่มีช่องนี้':'— ไม่พบบนฉลาก —',false]); return; }
+    if(el.tagName==='SELECT'){
+      const ok=Array.prototype.some.call(el.options,function(o){ return o.value===val||o.text===val; });
+      if(!ok){ rows.push([label,val,'ไม่ตรงกับตัวเลือกในระบบ — เลือกเอง',false]); return; }
+    }
+    el.value=val; rows.push([label,val,'เติมให้แล้ว',true]);
+  }
+  const codeEl=document.getElementById('f-rm-code');
+  if(codeEl&&!codeEl.value) genCode('rm');
+  put('ชื่อวัตถุดิบ','nameTh',d.nameTh);
+  put('ประเภท','type',rmTypeResolve(d.type||''));
+  put('ซัพพลายเออร์','supplier',d.supplier);
+  put('สารก่อภูมิแพ้','allergen',d.allergen);
+  put('ปริมาณรับเข้า','receivedQty',d.qty);
+  put('หน่วย','stockUnit',rmUnitResolve(d.unit||''));
+  const noteParts=[];
+  if(d.note) noteParts.push(d.note);
+  if(d.mfg) noteParts.push('ผลิต '+d.mfg);
+  if(d.exp) noteParts.push('หมดอายุ/BBF '+d.exp);
+  if(d.productCode) noteParts.push('รหัสสินค้า '+d.productCode);
+  if(noteParts.length){ const ne=document.getElementById('f-rm-note'); if(ne){ ne.value=noteParts.join(' | '); rows.push(['หมายเหตุ',ne.value,'เติมให้แล้ว',true]); } }
+  if(d.lot){ rmLots=[{round:1,code:String(d.lot),date:d.mfg&&/^\d{4}-\d{2}-\d{2}$/.test(d.mfg)?d.mfg:''}]; renderRmLots(); rows.push(['โค้ด/ล็อต',d.lot,'เติมให้แล้ว',true]); }
+  const rs=document.getElementById('rmai-result'); if(!rs) return;
+  var html='<div class="tablewrap"><table><tr><th>ช่อง</th><th>ที่ AI อ่านได้</th><th>สถานะ</th></tr>';
+  rows.forEach(function(r){
+    html+='<tr><td>'+esc(r[0])+'</td><td>'+(r[1]?esc(r[1]):'<span style="color:var(--muted)">-</span>')+'</td><td>'+(r[3]?'<span class="pill ok">'+esc(r[2])+'</span>':'<span class="pill warn">'+esc(r[2])+'</span>')+'</td></tr>';
+  });
+  html+='</table></div>';
+  if(d.confidence) html+='<div class="hint" style="margin-top:6px">ความมั่นใจของ AI: <b>'+esc(d.confidence)+'</b>'+(d.confidence==='ต่ำ'?' — ควรถ่ายใหม่ให้ชัดขึ้น หรือกรอกเอง':'')+'</div>';
+  const alEl=document.getElementById('f-rm-allergen');
+  if(!alEl||!alEl.value) html+='<div class="hint" style="color:var(--bad)">⚠ สารก่อภูมิแพ้: ระบบไม่เดาให้ — กรุณาตรวจจาก COA/สเปกแล้วเลือกเอง</div>';
+  rs.innerHTML=html;
+}
+
 /* ================= RM: นำเข้าหลายรายการจากข้อความ (paste → auto code + เช็คซ้ำ) ================= */
 let rmImportRows = [];
 function rmTypeResolve(t){
@@ -1230,6 +1324,7 @@ function buildRegTab(reg){
     <div class="card">
       <h2>${esc(cfg.title)}</h2>
       <div class="hint">${esc(cfg.hint)}</div>
+      ${reg==='rm' ? rmAiFillHTML() : ''}
       <div class="grid">
         ${cfg.fields.map(f=> f.type==='section'
           ? `<div class="wide" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><b style="color:var(--brand)">${esc(f.l)}</b></div>`
