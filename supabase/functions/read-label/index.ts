@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
   }
   if (!image) return json({ error: "ไม่พบรูปภาพ" }, 400);
 
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + key;
 
   let res: Response;
   try {
