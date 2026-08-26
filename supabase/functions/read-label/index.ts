@@ -31,6 +31,18 @@ const PROMPT = `คุณเป็นผู้ช่วยฝ่าย R&D โ�
 - note = ข้อมูลอื่นบนฉลากที่มีประโยชน์ต่อ R&D เช่น ฮาลาล โคเชอร์ วีแกน Non-GMO วิธีเก็บรักษา คำเตือน (สรุปสั้น ๆ ภาษาไทย)
 - confidence = ความมั่นใจในการอ่านโดยรวม ตอบว่า "สูง" หรือ "กลาง" หรือ "ต่ำ" (ถ้ารูปเบลอ/เอียง/แสงไม่พอ ให้ตอบ "ต่ำ")`;
 
+const PROMPT_DOC = PROMPT + `
+
+*** เอกสารนี้เป็นสเปก/COA/TDS ไม่ใช่ฉลากบนถุง — กฎเพิ่มเติม ***
+- qty และ unit: ใส่เฉพาะเมื่อเอกสารระบุ "ปริมาณที่ส่งมาจริง" เท่านั้น
+  ห้ามใช้ Net Weight / Packaging Configuration / ขนาดบรรจุเชิงพาณิชย์ เด็ดขาด (ให้ปล่อยว่าง "")
+- allergen: ดูตาราง Allergen / Allergen Properties ในเอกสาร
+  ถ้าทุกรายการเป็น Not Present / Non Allergen ให้ตอบ "ไม่มี"
+  ถ้ามีรายการใดเป็น Present ให้เลือกชนิดที่ตรงจากลิสต์
+- note: สรุปสั้น ๆ เป็นภาษาไทย ให้ครอบคลุม สถานะฮาลาล/โคเชอร์/วีแกน, GMO,
+  อายุการเก็บ, สภาวะการเก็บรักษา, ประเทศผู้ผลิต, และค่าวิเคราะห์เด่นที่ R&D ควรรู้
+- lot: ถ้าเอกสารไม่มีเลข Lot/Batch ให้ปล่อยว่าง อย่าใช้เลข Product code แทน`;
+
 const SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -64,11 +76,12 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("GEMINI_API_KEY");
   if (!key) return json({ error: "ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน Supabase (Edge Functions > Secrets)" }, 500);
 
-  let image = "", mime = "image/jpeg";
+  let image = "", mime = "image/jpeg", mode = "label";
   try {
     const body = await req.json();
     image = body.image || "";
     mime = body.mime || "image/jpeg";
+    mode = body.mode || "label";
   } catch {
     return json({ error: "อ่าน body ไม่ได้" }, 400);
   }
@@ -84,7 +97,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         contents: [{
           parts: [
-            { text: PROMPT },
+            { text: mode === "doc" ? PROMPT_DOC : PROMPT },
             { inline_data: { mime_type: mime, data: image } },
           ],
         }],
