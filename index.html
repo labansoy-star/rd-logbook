@@ -163,6 +163,24 @@
     #printArea .sig{display:flex;justify-content:space-between;margin-top:44px;text-align:center;font-size:13.5px}
     #printArea .sig>div{width:31%}
   }
+  /* ===== หมวดพับได้ (ลดความรกของหน้า) ===== */
+  details.fold{border:1px solid var(--line);border-radius:10px;margin:12px 0;background:#fff;overflow:hidden}
+  details.fold>summary{cursor:pointer;padding:11px 14px;font-weight:600;font-size:15px;color:var(--brand);list-style:none;user-select:none;background:#f8fafc}
+  details.fold>summary::-webkit-details-marker{display:none}
+  details.fold>summary::after{content:'▾';float:right;transition:transform .15s;color:var(--muted)}
+  details.fold[open]>summary::after{transform:rotate(180deg)}
+  details.fold>summary:hover{background:#eef2f7}
+  details.fold>summary .sub{font-weight:400;font-size:12.5px;color:var(--muted);margin-left:6px}
+  details.fold>.foldbody{padding:12px 14px 14px;border-top:1px solid var(--line)}
+  /* แบนการ์ดที่ซ้อนอยู่ข้างใน ไม่ให้เป็นกล่องซ้อนกล่อง */
+  details.fold>.foldbody>.card{border:0;background:transparent;padding:0;margin:0;box-shadow:none}
+  details.fold>.foldbody>.card>h2,details.fold>.foldbody>h2{display:none}
+  details.fold>.foldbody>.card+.card{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+  details.fold.tip{border-color:transparent;background:transparent;margin:4px 0 8px}
+  details.fold.tip>summary{padding:4px 0;font-size:13px;font-weight:400;color:var(--muted);background:transparent}
+  details.fold.tip>summary:hover{background:transparent;color:var(--brand)}
+  details.fold.tip>summary::after{content:'';float:none}
+  details.fold.tip>.foldbody{padding:6px 0 0;border-top:0}
 </style>
 <style>
   /* ---- หน้ากั้น: ล็อกอิน / กำลังโหลด / แจ้งข้อผิดพลาด ---- */
@@ -1349,32 +1367,45 @@ function buildRegTab(reg){
   <section class="tab" id="tab-${reg}">
     <div class="card">
       <h2>${esc(cfg.title)}</h2>
-      <div class="hint">${esc(cfg.hint)}</div>
-      ${reg==='rm' ? rmAiFillHTML() : ''}
-      <div class="grid">
-        ${cfg.fields.map(f=> f.type==='section'
-          ? `<div class="wide" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><b style="color:var(--brand)">${esc(f.l)}</b></div>`
-          : `<div${f.wide?' class="wide"':''}><label>${esc(f.l)}</label>${fieldInput(reg,f)}</div>`).join('')}
-      </div>
-      <div id="stdwarn-${reg}" class="stdhint"></div>
-      ${reg==='rd' ? batchEditorHTML() : ''}
-      ${reg==='rm' ? rmLotsEditorHTML() + rmCertEditorHTML() : ''}
-      ${reg==='is' ? isItemsEditorHTML() : ''}
-      ${reg==='sl' ? tastingEditorHTML() : ''}
-      <div class="btnrow">
-        <button class="btn primary" onclick="saveEntry('${reg}')" id="savebtn-${reg}">＋ บันทึกรายการ</button>
-        <button class="btn ghost" onclick="clearForm('${reg}')">ล้างฟอร์ม</button>
-        <button class="btn ghost" onclick="exportCSV('${reg}')">⬇ ส่งออก CSV (เปิดใน Excel)</button>
-      </div>
-      <div class="searchrow"><label style="font-size:13px;color:var(--muted)">ค้นหา:</label><input type="text" id="search-${reg}" placeholder="พิมพ์คำค้น เช่น รหัส ชื่อสูตร ลูกค้า…" oninput="renderTable('${reg}')"></div>
+      <details class="fold tip"><summary>ⓘ วิธีใช้หน้านี้</summary><div class="foldbody"><div class="hint" style="margin:0">${esc(cfg.hint)}</div></div></details>
+      <details class="fold" id="fold-${reg}">
+        <summary>＋ เพิ่มรายการใหม่ / แก้ไข<span class="sub">กดเพื่อเปิดฟอร์มกรอกข้อมูล</span></summary>
+        <div class="foldbody">
+          ${reg==='rm' ? rmAiFillHTML() : ''}
+          <div class="grid">
+            ${cfg.fields.map(f=> f.type==='section'
+              ? `<div class="wide" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><b style="color:var(--brand)">${esc(f.l)}</b></div>`
+              : `<div${f.wide?' class="wide"':''}><label>${esc(f.l)}</label>${fieldInput(reg,f)}</div>`).join('')}
+          </div>
+          <div id="stdwarn-${reg}" class="stdhint"></div>
+          ${reg==='rd' ? batchEditorHTML() : ''}
+          ${reg==='rm' ? rmLotsEditorHTML() : ''}
+          ${reg==='is' ? isItemsEditorHTML() : ''}
+          ${reg==='sl' ? tastingEditorHTML() : ''}
+          ${reg==='rm' ? `<details class="fold"><summary>📎 ไฟล์ใบรับรอง / สแกนเอกสาร<span class="sub">COA ฮาลาล GMP — แนบหรือถ่ายสแกนเป็น PDF</span></summary><div class="foldbody">${rmCertEditorHTML()}</div></details>` : ''}
+          <div class="btnrow">
+            <button class="btn primary" onclick="saveEntry('${reg}')" id="savebtn-${reg}">＋ บันทึกรายการ</button>
+            <button class="btn ghost" onclick="clearForm('${reg}')">ล้างฟอร์ม</button>
+          </div>
+        </div>
+      </details>
+      <div class="searchrow"><label style="font-size:13px;color:var(--muted)">ค้นหา:</label><input type="text" id="search-${reg}" placeholder="พิมพ์คำค้น เช่น รหัส ชื่อสูตร ลูกค้า…" oninput="renderTable('${reg}')">
+        <button class="btn ghost small" style="margin-left:auto" onclick="exportCSV('${reg}')">⬇ CSV</button></div>
       <div class="tablewrap"><table id="table-${reg}"></table></div>
-      ${reg==='rm' ? rmImportEditorHTML() : ''}
-      ${reg==='rm' ? buildRmMaster() : ''}
+      ${reg==='rm' ? `<details class="fold"><summary>📋 นำเข้าหลายรายการจากข้อความ<span class="sub">วางข้อความ/ตาราง แล้วเพิ่มทีละหลายตัว</span></summary><div class="foldbody">${rmImportEditorHTML()}</div></details>` : ''}
+      ${reg==='rm' ? `<details class="fold"><summary>📚 ฐานข้อมูลวัตถุดิบมาตรฐานโรงงาน<span class="sub">รายชื่ออ้างอิง ${RM_MASTER.length} รายการ (อ่านอย่างเดียว)</span></summary><div class="foldbody">${buildRmMaster()}</div></details>` : ''}
       ${reg==='is' ? `<h2 style="margin-top:20px">📊 สรุปยอดคงเหลือตัวอย่าง (อัตโนมัติ)</h2>
       <div class="hint">ยอดผลิตดึงจากทะเบียนตัวอย่างทดลอง (RD) / จำนวนที่เบิกรวมจากทะเบียนนี้ — คงเหลือ = ผลิต − เบิก</div>
       <div class="tablewrap"><table id="table-balance"></table></div>`:''}
     </div>
   </section>`;
+}
+
+/* เปิดหมวดฟอร์มที่พับไว้ แล้วเลื่อนไปหา (ใช้ตอนกด "แก้ไข") */
+function openRegForm(reg){
+  const d=document.getElementById('fold-'+reg);
+  if(d){ d.open=true; setTimeout(function(){ d.scrollIntoView({behavior:'smooth',block:'start'}); },60); }
+  else window.scrollTo({top:0,behavior:'smooth'});
 }
 
 /* ================= ฟอร์ม: บันทึก/แก้ไข ================= */
@@ -1465,7 +1496,7 @@ function editEntry(reg,id){
   if(reg==='sl'){ slTastings=row.tastings?JSON.parse(JSON.stringify(row.tastings)):[]; renderTastingEditor(); }
   if(reg==='rm'){ rmLots=JSON.parse(JSON.stringify(supplierLotsOf(row))); renderRmLots(); rmCertFiles=Array.isArray(row.certFiles)?JSON.parse(JSON.stringify(row.certFiles)):[]; renderRmCerts(); rmScanPages=[]; renderRmScan(); }
   document.getElementById('savebtn-'+reg).textContent='💾 บันทึกการแก้ไข';
-  window.scrollTo({top:0,behavior:'smooth'});
+  openRegForm(reg);
 }
 function delEntry(reg,id){
   if(!canEdit()){ alert('บัญชีนี้ลบข้อมูลไม่ได้ (เพิ่ม/ดูได้อย่างเดียว)'); return; }
