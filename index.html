@@ -181,6 +181,30 @@
   details.fold.tip>summary:hover{background:transparent;color:var(--brand)}
   details.fold.tip>summary::after{content:'';float:none}
   details.fold.tip>.foldbody{padding:6px 0 0;border-top:0}
+  /* ===== แถบเครื่องมือตาราง: ค้นหา / กรอง / เรียง / แบ่งหน้า ===== */
+  .searchrow .bigsearch{flex:1;min-width:190px;max-width:380px}
+  .tcount{font-size:13px;color:var(--muted);white-space:nowrap;font-weight:600}
+  .filterrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+  .filterrow:empty{display:none}
+  .filterrow select{max-width:210px;font-size:13px;padding:5px 8px}
+  th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  th.sortable:hover{background:#e7edf5}
+  .pager{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--muted)}
+  .tablewrap table td{padding:6px 8px;vertical-align:middle}
+  .tablewrap table th{padding:8px}
+  /* คอลัมน์ที่ยาว: ตัดบรรทัดเดียว มี ... (กันแถวสูงเกิน) */
+  .tablewrap td.c-type,.tablewrap td.c-supplier,.tablewrap td.c-requester{white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+  .tablewrap td.c-nameTh,.tablewrap td.c-name{max-width:260px}
+  .tablewrap th.c-nameTh,.tablewrap td.c-nameTh,.tablewrap th.c-name,.tablewrap td.c-name{min-width:200px}
+  .tablewrap th.c-code,.tablewrap td.c-code{white-space:nowrap}
+  @media(max-width:760px){
+    /* มือถือ: ซ่อนคอลัมน์รอง ให้เหลือที่สำหรับข้อมูลหลัก */
+    .tablewrap td.c-supplier,.tablewrap th.c-supplier,
+    .tablewrap td.c-received,.tablewrap th.c-received,
+    .tablewrap td.c-_certfiles,.tablewrap th.c-_certfiles,
+    .tablewrap td.c-allergen,.tablewrap th.c-allergen{display:none}
+    .tablewrap td.c-type{max-width:96px}
+  }
 </style>
 <style>
   /* ---- หน้ากั้น: ล็อกอิน / กำลังโหลด / แจ้งข้อผิดพลาด ---- */
@@ -1389,9 +1413,13 @@ function buildRegTab(reg){
           </div>
         </div>
       </details>
-      <div class="searchrow"><label style="font-size:13px;color:var(--muted)">ค้นหา:</label><input type="text" id="search-${reg}" placeholder="พิมพ์คำค้น เช่น รหัส ชื่อสูตร ลูกค้า…" oninput="renderTable('${reg}')">
+      <div class="searchrow">
+        <input type="text" id="search-${reg}" class="bigsearch" placeholder="🔍 ค้นหาทุกช่อง เช่น รหัส ชื่อ ซัพพลายเออร์ ล็อต…" oninput="tblSearch('${reg}')">
+        <span id="count-${reg}" class="tcount"></span>
         <button class="btn ghost small" style="margin-left:auto" onclick="exportCSV('${reg}')">⬇ CSV</button></div>
+      <div class="filterrow" id="filters-${reg}">${tblFilterHTML(reg)}</div>
       <div class="tablewrap"><table id="table-${reg}"></table></div>
+      <div id="pager-${reg}"></div>
       ${reg==='rm' ? `<details class="fold"><summary>📋 นำเข้าหลายรายการจากข้อความ<span class="sub">วางข้อความ/ตาราง แล้วเพิ่มทีละหลายตัว</span></summary><div class="foldbody">${rmImportEditorHTML()}</div></details>` : ''}
       ${reg==='rm' ? `<details class="fold"><summary>📚 ฐานข้อมูลวัตถุดิบมาตรฐานโรงงาน<span class="sub">รายชื่ออ้างอิง ${RM_MASTER.length} รายการ (อ่านอย่างเดียว)</span></summary><div class="foldbody">${buildRmMaster()}</div></details>` : ''}
       ${reg==='is' ? `<h2 style="margin-top:20px">📊 สรุปยอดคงเหลือตัวอย่าง (อัตโนมัติ)</h2>
@@ -1638,35 +1666,96 @@ function cellVal(reg,row,k){
   if(k==='status'||k==='result'||k==='spec') return statusPill(reg,k,v);
   return esc(v);
 }
-function renderTable(reg){
+/* ===== สถานะตาราง: ค้นหา / ตัวกรอง / เรียงลำดับ / แบ่งหน้า (ใช้ได้ทุกทะเบียน) ===== */
+const tblUI={};
+function tblUIOf(reg){ if(!tblUI[reg]) tblUI[reg]={sort:'',dir:1,page:0,per:25,f:{}}; return tblUI[reg]; }
+function tblColLabel(cfg,k){
+  const M={_exp:'วันหมดอายุ (คำนวณ)',_next:'รอบชิมถัดไป (คำนวณ)',_lastTaste:'ชิมล่าสุด',_rounds:'ชิมแล้ว (ครั้ง)',
+    _stock:'คงเหลือสต็อก',_fgStock:'คงเหลือในสต็อก FG',_items:'รายการที่เบิก',_lots:'โค้ด/ล็อตซัพพลายเออร์',
+    _certfiles:'ไฟล์ใบรับรอง',_rdResult:'สถานะ (ตาม RD)'};
+  if(M[k]) return M[k];
+  const f=cfg.fields.find(function(x){return x.k===k;}); return f?f.l:k;
+}
+function tblFilterFields(reg){
   const cfg=REGS[reg];
-  const q=(document.getElementById('search-'+reg)||{value:''}).value.toLowerCase();
-  const rows=state[reg].filter(r=>!q || JSON.stringify(r).toLowerCase().includes(q));
-  const head='<tr><th>#</th>'+cfg.cols.map(k=>{
-    if(k==='_exp') return '<th>วันหมดอายุ (คำนวณ)</th>';
-    if(k==='_next') return '<th>รอบชิมถัดไป (คำนวณ)</th>';
-    if(k==='_lastTaste') return '<th>ชิมล่าสุด</th>';
-    if(k==='_rounds') return '<th>ชิมแล้ว (ครั้ง)</th>';
-    if(k==='_stock') return '<th>คงเหลือสต็อก</th>';
-    if(k==='_fgStock') return '<th>คงเหลือในสต็อก FG</th>';
-    if(k==='_items') return '<th>รายการที่เบิก</th>';
-    if(k==='_lots') return '<th>โค้ด/ล็อตซัพพลายเออร์</th>';
-    if(k==='_certfiles') return '<th>ไฟล์ใบรับรอง</th>';
-    if(k==='_rdResult') return '<th>สถานะ (ตาม RD)</th>';
-    const f=cfg.fields.find(x=>x.k===k); return `<th>${esc(f?f.l:k)}</th>`;
+  return cfg.fields.filter(function(f){ return f.type==='select' && cfg.cols.indexOf(f.k)>=0 && (f.opt||[]).length; });
+}
+function tblFilterHTML(reg){
+  const fs=tblFilterFields(reg); if(!fs.length) return '';
+  return fs.map(function(f){
+    return '<select onchange="tblSetFilter(\''+reg+'\',\''+f.k+'\',this.value)">'
+      +'<option value="">'+esc(f.l)+' : ทั้งหมด</option>'
+      +f.opt.map(function(o){ return '<option value="'+esc(o)+'">'+esc(o)+'</option>'; }).join('')
+      +'</select>';
+  }).join('')+'<button class="btn ghost small" onclick="tblClearFilters(\''+reg+'\')">ล้างตัวกรอง</button>';
+}
+function tblSearch(reg){ tblUIOf(reg).page=0; renderTable(reg); }
+function tblSetFilter(reg,k,v){ const u=tblUIOf(reg); if(v) u.f[k]=v; else delete u.f[k]; u.page=0; renderTable(reg); }
+function tblClearFilters(reg){
+  const u=tblUIOf(reg); u.f={}; u.page=0;
+  const fr=document.getElementById('filters-'+reg);
+  if(fr) fr.querySelectorAll('select').forEach(function(s){ s.value=''; });
+  const q=document.getElementById('search-'+reg); if(q) q.value='';
+  renderTable(reg);
+}
+function tblSort(reg,k){ const u=tblUIOf(reg); if(u.sort===k){ u.dir=-u.dir; } else { u.sort=k; u.dir=1; } u.page=0; renderTable(reg); }
+function tblPage(reg,d){ const u=tblUIOf(reg); u.page=Math.max(0,u.page+d); renderTable(reg); }
+function tblShowAll(reg){ const u=tblUIOf(reg); u.per=(u.per>1000?25:1000000); u.page=0; renderTable(reg); }
+function renderTable(reg){
+  const cfg=REGS[reg], u=tblUIOf(reg);
+  const q=((document.getElementById('search-'+reg)||{}).value||'').toLowerCase();
+  let rows=state[reg].filter(function(r){
+    if(q && JSON.stringify(r).toLowerCase().indexOf(q)<0) return false;
+    for(const k in u.f){ if(String(r[k]||'')!==u.f[k]) return false; }
+    return true;
+  });
+  const total=state[reg].length, found=rows.length;
+  if(u.sort){
+    const k=u.sort, d=u.dir;
+    rows=rows.slice().sort(function(a,b){
+      const A=(a[k]==null?'':a[k]), B=(b[k]==null?'':b[k]);
+      const na=parseFloat(A), nb=parseFloat(B);
+      if(!isNaN(na)&&!isNaN(nb)&&String(A).trim()!==''&&String(B).trim()!=='') return (na-nb)*d;
+      return String(A).localeCompare(String(B),'th')*d;
+    });
+  }
+  const per=u.per, pages=Math.max(1,Math.ceil(found/per));
+  if(u.page>pages-1) u.page=pages-1;
+  const start=u.page*per, pageRows=rows.slice(start,start+per);
+  const head='<tr><th>#</th>'+cfg.cols.map(function(k){
+    const lab=esc(tblColLabel(cfg,k));
+    if(k.charAt(0)==='_') return '<th class="c-'+k+'">'+lab+'</th>';
+    const ar=(u.sort===k)?(u.dir>0?' ▲':' ▼'):'';
+    return '<th class="c-'+k+' sortable" onclick="tblSort(\''+reg+'\',\''+k+'\')" title="กดเพื่อเรียงลำดับ">'+lab+ar+'</th>';
   }).join('')+'<th>จัดการ</th></tr>';
-  const body=rows.map((r,i)=>'<tr><td>'+(i+1)+'</td>'+cfg.cols.map(k=>`<td>${cellVal(reg,r,k)}</td>`).join('')+
-    `<td style="white-space:nowrap">`+
-    (canEdit()?`<button class="btn ghost small" onclick="editEntry('${reg}','${r._id}')">แก้ไข</button> `:'')+
-    (reg==='is'?`<button class="btn ghost small" onclick="printSlip('${r._id}')">🖨 ใบเบิก</button> `:'')+
-    (reg==='is'&&r.purpose==='ส่งลูกค้า'?`<button class="btn ghost small" onclick="printEnvelope('${r._id}')">✉️ จ่าหน้าซอง</button> `:'')+
-    (reg==='rd'?`<button class="btn ghost small" onclick="printRD('${r._id}')">🖨 FM-RD-01</button> `:'')+
-    (reg==='rm'&&canEdit()?`<button class="btn ghost small" onclick="refillStock('${r._id}')">➕ รับเข้าเพิ่ม</button> `:'')+
-    (reg==='fg'?`<button class="btn ghost small" onclick="printLabel('${r._id}')">🏷️ Label</button> `:'')+
-    (reg==='sl'&&canEdit()?`<button class="btn ghost small" onclick="slAddTastingFor('${r._id}')">➕ บันทึกผลชิม</button> `:'')+
-    (canEdit()?`<button class="btn danger small" onclick="delEntry('${reg}','${r._id}')">ลบ</button>`:'<span style="color:var(--muted);font-size:12px">ดูอย่างเดียว</span>')+
-    `</td></tr>`).join('');
-  document.getElementById('table-'+reg).innerHTML=head+(body||`<tr><td colspan="${cfg.cols.length+2}" style="text-align:center;color:var(--muted)">— ยังไม่มีข้อมูล —</td></tr>`);
+  const body=pageRows.map(function(r,i){ return '<tr><td>'+(start+i+1)+'</td>'+cfg.cols.map(function(k){ return '<td class="c-'+k+'">'+cellVal(reg,r,k)+'</td>'; }).join('')+
+    '<td style="white-space:nowrap">'+
+    (canEdit()?'<button class="btn ghost small" onclick="editEntry(\''+reg+'\',\''+r._id+'\')">แก้ไข</button> ':'')+
+    (reg==='is'?'<button class="btn ghost small" title="พิมพ์ใบเบิก" onclick="printSlip(\''+r._id+'\')">🖨</button> ':'')+
+    (reg==='is'&&r.purpose==='ส่งลูกค้า'?'<button class="btn ghost small" title="จ่าหน้าซอง" onclick="printEnvelope(\''+r._id+'\')">✉️</button> ':'')+
+    (reg==='rd'?'<button class="btn ghost small" title="พิมพ์ FM-RD-01" onclick="printRD(\''+r._id+'\')">🖨</button> ':'')+
+    (reg==='rm'&&canEdit()?'<button class="btn ghost small" title="รับเข้าเพิ่ม" onclick="refillStock(\''+r._id+'\')">➕</button> ':'')+
+    (reg==='fg'?'<button class="btn ghost small" title="พิมพ์ฉลาก" onclick="printLabel(\''+r._id+'\')">🏷️</button> ':'')+
+    (reg==='sl'&&canEdit()?'<button class="btn ghost small" title="บันทึกผลชิม" onclick="slAddTastingFor(\''+r._id+'\')">➕</button> ':'')+
+    (canEdit()?'<button class="btn danger small" title="ลบ" onclick="delEntry(\''+reg+'\',\''+r._id+'\')">🗑</button>':'<span style="color:var(--muted);font-size:12px">ดูอย่างเดียว</span>')+
+    '</td></tr>'; }).join('');
+  const empty='<tr><td colspan="'+(cfg.cols.length+2)+'" style="text-align:center;color:var(--muted);padding:18px">'
+    +(total===0?'— ยังไม่มีข้อมูล —':'— ไม่พบรายการที่ตรงกับเงื่อนไข <button class="btn ghost small" onclick="tblClearFilters(\''+reg+'\')">ล้างตัวกรอง</button> —')+'</td></tr>';
+  document.getElementById('table-'+reg).innerHTML=head+(body||empty);
+  const cnt=document.getElementById('count-'+reg);
+  if(cnt) cnt.textContent=(found===total)?('ทั้งหมด '+total+' รายการ'):('พบ '+found+' จาก '+total+' รายการ');
+  const pg=document.getElementById('pager-'+reg);
+  if(pg){
+    if(found<=per) pg.innerHTML='';
+    else{
+      const from=start+1, to=Math.min(start+per,found);
+      pg.innerHTML='<div class="pager">'
+        +'<button class="btn ghost small"'+(u.page<=0?' disabled':'')+' onclick="tblPage(\''+reg+'\',-1)">‹ ก่อนหน้า</button>'
+        +'<span>'+from+'–'+to+' จาก '+found+' &nbsp;(หน้า '+(u.page+1)+'/'+pages+')</span>'
+        +'<button class="btn ghost small"'+(to>=found?' disabled':'')+' onclick="tblPage(\''+reg+'\',1)">ถัดไป ›</button>'
+        +'<button class="btn ghost small" onclick="tblShowAll(\''+reg+'\')">'+(per>1000?'แบ่งหน้า 25':'แสดงทั้งหมด')+'</button></div>';
+    }
+  }
   if(reg==='is') renderBalance();
 }
 function renderBalance(){
