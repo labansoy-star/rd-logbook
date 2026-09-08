@@ -190,6 +190,20 @@
   th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
   th.sortable:hover{background:#e7edf5}
   .pager{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--muted)}
+  /* ===== แดชบอร์ด: การ์ดรายการล่าสุด ===== */
+  .latestgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;margin-top:8px}
+  .latestcard{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .lhead{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#f8fafc;border-bottom:1px solid var(--line);font-weight:700;font-size:14px;color:var(--brand)}
+  .lcount{margin-left:auto;font-weight:400;font-size:12px;color:var(--muted);white-space:nowrap}
+  .llist{list-style:none;margin:0;padding:0}
+  .llist li{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:13.5px}
+  .llist li:last-child{border-bottom:0}
+  .llist li:hover{background:#eff6ff}
+  .llist li.empty{color:var(--muted);cursor:default;justify-content:center}
+  .llist li.empty:hover{background:transparent}
+  .lcode{font-family:ui-monospace,monospace;font-weight:700;color:var(--brand);white-space:nowrap;font-size:12.5px}
+  .ltxt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .aibtn{padding:1px 7px;line-height:1.5}
   .tablewrap table td{padding:6px 8px;vertical-align:middle}
   .tablewrap table th{padding:8px}
   /* คอลัมน์ที่ยาว: ตัดบรรทัดเดียว มี ... (กันแถวสูงเกิน) */
@@ -1780,6 +1794,110 @@ function renderBalance(){
 }
 
 /* ================= แดชบอร์ด ================= */
+/* ===== แดชบอร์ด: รายการล่าสุดของแต่ละหมวด + ให้ AI วิเคราะห์วัตถุดิบใหม่ ===== */
+function dashLatest(reg,n){
+  return state[reg].slice().sort(function(a,b){
+    const A=String(a.code||a.sampleCode||''), B=String(b.code||b.sampleCode||'');
+    return B.localeCompare(A,undefined,{numeric:true});
+  }).slice(0,n||4);
+}
+function dashOpen(reg,id){
+  switchTab(reg);
+  setTimeout(function(){
+    if(typeof canEdit==='function' && canEdit()){ editEntry(reg,id); }
+    else{
+      const r=state[reg].find(function(x){return x._id===id;});
+      const s=document.getElementById('search-'+reg);
+      if(r&&s){ s.value=r.code||r.sampleCode||''; tblSearch(reg); }
+    }
+  },140);
+}
+function dashLatestHTML(){
+  const groups=[
+    {reg:'rm',icon:'🧂',title:'วัตถุดิบ (RM)',lab:function(r){return (r.nameTh||'-')+(r.type?' · '+r.type:'');}},
+    {reg:'rd',icon:'🧪',title:'ตัวอย่างทดลอง (RD)',lab:function(r){return r.name||'-';}},
+    {reg:'fg',icon:'📦',title:'สินค้า FG',lab:function(r){return r.nameTh||'-';}},
+    {reg:'rq',icon:'📋',title:'คำขอพัฒนา (RQ)',lab:function(r){return (r.productName||'-')+(r.status?' · '+r.status:'');}},
+    {reg:'is',icon:'🚚',title:'เบิก-จ่าย (IS)',lab:function(r){return (r.purpose||'-')+(r.receiver?' → '+r.receiver:'');}},
+    {reg:'sl',icon:'⏳',title:'Shelf-life',lab:function(r){return r.name||r.sampleCode||'-';}}
+  ];
+  return '<div class="latestgrid">'+groups.map(function(g){
+    const rows=dashLatest(g.reg,4), total=state[g.reg].length;
+    const items=rows.length? rows.map(function(r){
+      return '<li onclick="dashOpen(&quot;'+g.reg+'&quot;,&quot;'+r._id+'&quot;)" title="กดเพื่อเปิดรายการนี้">'
+        +'<span class="lcode">'+esc(r.code||r.sampleCode||'-')+'</span>'
+        +'<span class="ltxt">'+esc(g.lab(r))+'</span>'
+        +(g.reg==='rm'?'<button class="btn ghost small aibtn" title="ให้ AI วิเคราะห์ว่าเอาไปทดลองกับสูตรไหนได้" onclick="event.stopPropagation();rmSuggest(&quot;'+r._id+'&quot;)">🤖</button>':'')
+        +'</li>';
+    }).join('') : '<li class="empty">— ยังไม่มีข้อมูล —</li>';
+    return '<div class="latestcard"><div class="lhead"><span>'+g.icon+' '+g.title+'</span>'
+      +'<span class="lcount">'+total+' รายการ</span>'
+      +'<button class="btn ghost small" onclick="switchTab(&quot;'+g.reg+'&quot;)">ดูทั้งหมด</button></div>'
+      +'<ul class="llist">'+items+'</ul></div>';
+  }).join('')+'</div>';
+}
+function dashModal(title,body){
+  const old=document.getElementById('dashmodal'); if(old) old.remove();
+  const d=document.createElement('div'); d.id='dashmodal';
+  d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;max-width:640px;width:100%;max-height:90vh;overflow:auto">'
+    +'<div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px">'
+    +'<span style="flex:1;font-weight:700">'+title+'</span>'
+    +'<button class="btn ghost small" onclick="document.getElementById(&quot;dashmodal&quot;).remove()">ปิด</button></div>'
+    +'<div id="dashmodal-body">'+body+'</div></div>';
+  document.body.appendChild(d); return d;
+}
+function dashModalBody(html){ const b=document.getElementById('dashmodal-body'); if(b) b.innerHTML=html; }
+function rmSuggestHTML(r,d){
+  var h='<div style="padding:14px">';
+  h+='<div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:12px">'
+    +'<b>'+esc(r.code||'')+' '+esc(r.nameTh||'')+'</b>'
+    +'<div style="font-size:13px;color:var(--muted);margin-top:4px">'+esc(d.summary||'')+'</div></div>';
+  if(d.ideas&&d.ideas.length){
+    h+='<div style="font-weight:700;margin-bottom:6px">แนวทางที่น่าลอง</div>';
+    h+=d.ideas.map(function(x,i){
+      return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+        +'<div style="font-weight:600;color:var(--brand)">'+(i+1)+'. '+esc(x.product||'')+'</div>'
+        +(x.why?'<div style="font-size:13px;margin-top:4px"><b>ทำไม:</b> '+esc(x.why)+'</div>':'')
+        +(x.how?'<div style="font-size:13px;margin-top:2px"><b>ลองยังไง:</b> '+esc(x.how)+'</div>':'')
+        +'</div>';
+    }).join('');
+  }
+  if(d.cautions) h+='<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:10px 12px;font-size:13px;color:#92400e"><b>⚠ ข้อควรระวัง:</b> '+esc(d.cautions)+'</div>';
+  h+='<div style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6">* เป็นข้อเสนอจาก AI ไว้ช่วยคิด <b>ไม่ใช่ข้อสรุปทางเทคนิค</b> — ต้องให้ R&D ตรวจสอบและทดลองจริงก่อนใช้</div>';
+  return h+'</div>';
+}
+async function rmSuggest(id){
+  const r=state.rm.find(function(x){return x._id===id;}); if(!r) return;
+  dashModal('🤖 วิเคราะห์: '+esc(r.nameTh||r.code||''),
+    '<div style="padding:26px;text-align:center;color:var(--muted)">กำลังให้ AI เทียบวัตถุดิบตัวนี้กับสูตรของโรงงาน…<br>(ประมาณ 5–15 วินาที)</div>');
+  try{
+    const formulas=(typeof SOY_FORMULAS!=='undefined'?SOY_FORMULAS:[]).map(function(f){
+      return '- '+f.product+' ['+f.brand+']: '+f.ingredients.map(function(x){return x.name;}).join(', ');
+    }).join('\n');
+    const same=state.rm.filter(function(x){ return x.type===r.type && x._id!==r._id; })
+      .slice(0,25).map(function(x){ return x.code+' '+x.nameTh; }).join(' | ');
+    const ctx='วัตถุดิบใหม่ที่เพิ่งรับเข้า:\n'
+      +'- ชื่อ: '+(r.nameTh||'-')+'\n'
+      +'- ประเภท: '+(r.type||'ยังไม่ระบุ')+'\n'
+      +'- ซัพพลายเออร์: '+(r.supplier||'-')+'\n'
+      +'- สารก่อภูมิแพ้: '+(r.allergen||'ยังไม่ระบุ')+'\n'
+      +'- หมายเหตุจากฉลาก/สเปก: '+(r.note||'-')+'\n\n'
+      +'สูตรมาตรฐานที่โรงงานผลิตอยู่ (ชื่อ [แบรนด์]: วัตถุดิบในสูตร):\n'+(formulas||'(ไม่มีข้อมูล)')+'\n\n'
+      +'วัตถุดิบประเภทเดียวกันที่โรงงานมีอยู่แล้ว: '+(same||'ไม่มี');
+    const res=await fetch(sbBase()+'/functions/v1/read-label',{method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY)},
+      body:JSON.stringify({mode:'suggest', text:ctx})});
+    const t=await res.text();
+    if(!res.ok) throw new Error('('+res.status+') '+t.slice(0,250));
+    const d=JSON.parse(t);
+    if(d.error) throw new Error(d.error);
+    dashModalBody(rmSuggestHTML(r,d));
+  }catch(e){
+    dashModalBody('<div style="padding:16px;color:var(--bad)">วิเคราะห์ไม่สำเร็จ: '+esc(e.message||String(e))+'</div>');
+  }
+}
+
 function renderDash(){
   const y=beYear2();
   const rqOpen=state.rq.filter(r=>['รับเรื่อง','กำลังพัฒนา','รอชิม/อนุมัติ'].includes(r.status)).length;
@@ -1802,6 +1920,7 @@ function renderDash(){
     {t:'ใบเบิกทั้งหมดปีนี้',n:state.is.filter(r=>(r.code||'').startsWith('IS-'+y)).length,tab:'is',cls:''},
   ];
   let html='<div class="cards">'+stats.map(s=>`<div class="stat ${s.cls}" onclick="switchTab('${s.tab}')"><div class="n">${s.n}</div><div class="t">${s.t}</div></div>`).join('')+'</div>';
+  html+='<h2 style="margin:18px 0 4px">🕒 รายการล่าสุด</h2><div class="hint">กดที่รายการเพื่อเปิดทำงานต่อได้ทันที — ไม่ต้องเลื่อนหาในตาราง</div>'+dashLatestHTML();
 
   const li=[];
   rmWait.forEach(r=>li.push(`<span class="pill warn">รอทดลอง</span> วัตถุดิบ ${esc(r.code)} ${esc(r.nameTh)}`));
