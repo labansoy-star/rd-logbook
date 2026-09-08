@@ -43,6 +43,39 @@ const PROMPT_DOC = PROMPT + `
   อายุการเก็บ, สภาวะการเก็บรักษา, ประเทศผู้ผลิต, และค่าวิเคราะห์เด่นที่ R&D ควรรู้
 - lot: ถ้าเอกสารไม่มีเลข Lot/Batch ให้ปล่อยว่าง อย่าใช้เลข Product code แทน`;
 
+const PROMPT_SUGGEST = `คุณเป็นนักวิจัยพัฒนาผลิตภัณฑ์ (R&D) ของโรงงานนมถั่วเหลือง
+ผู้ใช้เพิ่งรับ "วัตถุดิบใหม่" เข้ามา ให้วิเคราะห์ว่าเอาไปทดลองกับสูตร/ผลิตภัณฑ์ใดของโรงงานได้บ้าง
+
+กฎสำคัญ (ห้ามฝ่าฝืน):
+1. เสนอได้เฉพาะสูตร/ผลิตภัณฑ์ที่อยู่ในรายการที่ให้มาเท่านั้น ห้ามคิดชื่อสูตรใหม่ที่ไม่มีในรายการ
+2. ถ้าวัตถุดิบนี้ใช้ทดแทนของเดิมในสูตรได้ ให้ระบุชัดว่าแทนวัตถุดิบตัวไหน
+3. ห้ามอ้างตัวเลข % หรือปริมาณที่ไม่ได้ให้มา ถ้าจะแนะนำระดับการใช้ ให้บอกเป็นแนวทางกว้าง ๆ ว่าเริ่มจากน้อยแล้วปรับ
+4. เสนอ 2-4 แนวทาง เรียงจากที่น่าจะเข้ากันที่สุด
+5. ถ้าข้อมูลไม่พอจะสรุป ให้บอกตรง ๆ ว่าต้องรู้อะไรเพิ่ม
+6. ตอบภาษาไทย กระชับ ใช้ได้จริงหน้างาน
+
+รูปแบบคำตอบ:
+- summary = วัตถุดิบนี้คืออะไร ทำหน้าที่อะไรในเครื่องดื่ม (1-2 ประโยค)
+- ideas[] = { product: ชื่อสูตร/ผลิตภัณฑ์จากรายการที่ให้มา, why: เหตุผลว่าทำไมเข้ากัน (อ้างวัตถุดิบเดิมในสูตรถ้าเกี่ยว), how: จะลองยังไง เช่น แทนตัวไหน ดูอะไรเป็นเกณฑ์ }
+- cautions = ข้อควรระวัง เช่น สารก่อภูมิแพ้ ฮาลาล/เจ ความคงตัว สี-รสเพี้ยน หรือข้อมูลที่ยังขาด`;
+
+const SCHEMA_SUGGEST = {
+  type: "OBJECT",
+  properties: {
+    summary: { type: "STRING" },
+    ideas: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: { product: { type: "STRING" }, why: { type: "STRING" }, how: { type: "STRING" } },
+        required: ["product", "why"],
+      },
+    },
+    cautions: { type: "STRING" },
+  },
+  required: ["summary", "ideas"],
+};
+
 const SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -76,16 +109,19 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("GEMINI_API_KEY");
   if (!key) return json({ error: "ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน Supabase (Edge Functions > Secrets)" }, 500);
 
-  let image = "", mime = "image/jpeg", mode = "label";
+  let image = "", mime = "image/jpeg", mode = "label", text = "";
   try {
     const body = await req.json();
     image = body.image || "";
     mime = body.mime || "image/jpeg";
     mode = body.mode || "label";
+    text = body.text || "";
   } catch {
     return json({ error: "อ่าน body ไม่ได้" }, 400);
   }
-  if (!image) return json({ error: "ไม่พบรูปภาพ" }, 400);
+  const isSuggest = (mode === "suggest");
+  if (!isSuggest && !image) return json({ error: "ไม่พบรูปภาพ" }, 400);
+  if (isSuggest && !text) return json({ error: "ไม่พบข้อมูลสำหรับวิเคราะห์" }, 400);
 
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + key;
 
@@ -96,15 +132,17 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{
-          parts: [
-            { text: mode === "doc" ? PROMPT_DOC : PROMPT },
-            { inline_data: { mime_type: mime, data: image } },
-          ],
+          parts: isSuggest
+            ? [ { text: PROMPT_SUGGEST + "\n\n===== ข้อมูลจากระบบ =====\n" + text } ]
+            : [
+                { text: mode === "doc" ? PROMPT_DOC : PROMPT },
+                { inline_data: { mime_type: mime, data: image } },
+              ],
         }],
         generationConfig: {
           temperature: 0,
           responseMimeType: "application/json",
-          responseSchema: SCHEMA,
+          responseSchema: isSuggest ? SCHEMA_SUGGEST : SCHEMA,
         },
       }),
     });
