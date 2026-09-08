@@ -125,35 +125,56 @@ Deno.serve(async (req) => {
 
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + key;
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: isSuggest
-            ? [ { text: PROMPT_SUGGEST + "\n\n===== ข้อมูลจากระบบ =====\n" + text } ]
-            : [
-                { text: mode === "doc" ? PROMPT_DOC : PROMPT },
-                { inline_data: { mime_type: mime, data: image } },
-              ],
-        }],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: "application/json",
-          responseSchema: isSuggest ? SCHEMA_SUGGEST : SCHEMA,
-        },
-      }),
-    });
-  } catch (e) {
-    return json({ error: "เรียก Gemini ไม่สำเร็จ: " + String(e) }, 502);
+  const payload = JSON.stringify({
+    contents: [{
+      parts: isSuggest
+        ? [ { text: PROMPT_SUGGEST + "\n\n===== ข้อมูลจากระบบ =====\n" + text } ]
+        : [
+            { text: mode === "doc" ? PROMPT_DOC : PROMPT },
+            { inline_data: { mime_type: mime, data: image } },
+          ],
+    }],
+    generationConfig: {
+      temperature: 0,
+      responseMimeType: "application/json",
+      responseSchema: isSuggest ? SCHEMA_SUGGEST : SCHEMA,
+    },
+  });
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let res: Response | null = null;
+  let raw = "";
+  let lastErr = "";
+
+  // Gemini ตอบ 503 (คนใช้เยอะ) เป็นครั้งคราว → ลองซ้ำอัตโนมัติสูงสุด 4 ครั้ง
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await sleep(1200 * attempt);
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      });
+    } catch (e) {
+      lastErr = String(e);
+      res = null;
+      continue;
+    }
+    raw = await res.text();
+    if (res.ok) break;
+    if (res.status === 503 || res.status === 500 || res.status === 429) {
+      lastErr = raw.slice(0, 200);
+      continue;
+    }
+    break;
   }
 
-  const raw = await res.text();
+  if (!res) return json({ error: "เรียก Gemini ไม่สำเร็จ: " + lastErr }, 502);
+
   if (!res.ok) {
     let msg = raw.slice(0, 400);
     if (res.status === 429) msg = "โควตาฟรีของวันนี้เต็มแล้ว ลองใหม่พรุ่งนี้ หรือกรอกเอง";
+    if (res.status === 503) msg = "ตอนนี้คนใช้ AI พร้อมกันเยอะ ลองกดซ้ำอีกครั้งใน 1-2 นาที";
     if (res.status === 400 && raw.includes("API key")) msg = "API key ไม่ถูกต้อง — ตรวจค่า GEMINI_API_KEY";
     return json({ error: "Gemini ตอบกลับผิดพลาด (" + res.status + "): " + msg }, 502);
   }
