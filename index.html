@@ -1870,7 +1870,7 @@ function rmSuggestHTML(r,d){
 async function rmSuggest(id){
   const r=state.rm.find(function(x){return x._id===id;}); if(!r) return;
   dashModal('🤖 วิเคราะห์: '+esc(r.nameTh||r.code||''),
-    '<div style="padding:26px;text-align:center;color:var(--muted)">กำลังให้ AI เทียบวัตถุดิบตัวนี้กับสูตรของโรงงาน…<br>(ประมาณ 5–15 วินาที)</div>');
+    '<div style="padding:26px;text-align:center;color:var(--muted)">กำลังให้ AI เทียบวัตถุดิบตัวนี้กับสูตรของโรงงาน…<br>(ประมาณ 10–40 วินาที)</div>');
   try{
     const formulas=(typeof SOY_FORMULAS!=='undefined'?SOY_FORMULAS:[]).map(function(f){
       return '- '+f.product+' ['+f.brand+']: '+f.ingredients.map(function(x){return x.name;}).join(', ');
@@ -1885,16 +1885,25 @@ async function rmSuggest(id){
       +'- หมายเหตุจากฉลาก/สเปก: '+(r.note||'-')+'\n\n'
       +'สูตรมาตรฐานที่โรงงานผลิตอยู่ (ชื่อ [แบรนด์]: วัตถุดิบในสูตร):\n'+(formulas||'(ไม่มีข้อมูล)')+'\n\n'
       +'วัตถุดิบประเภทเดียวกันที่โรงงานมีอยู่แล้ว: '+(same||'ไม่มี');
-    const res=await fetch(sbBase()+'/functions/v1/read-label',{method:'POST',
-      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY)},
-      body:JSON.stringify({mode:'suggest', text:ctx})});
-    const t=await res.text();
-    if(!res.ok) throw new Error('('+res.status+') '+t.slice(0,250));
+    const ac=new AbortController(); const tmr=setTimeout(function(){ac.abort();},150000);
+    let res,t;
+    try{
+      res=await fetch(sbBase()+'/functions/v1/read-label',{method:'POST',signal:ac.signal,
+        headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session&&session.access_token?session.access_token:SUPABASE_ANON_KEY)},
+        body:JSON.stringify({mode:'suggest', text:ctx})});
+      t=await res.text();
+    }finally{ clearTimeout(tmr); }
+    if(!res.ok){
+      let m=t; try{ const j=JSON.parse(t); if(j.error) m=j.error; }catch(_){ m=t.slice(0,250); }
+      throw new Error(m);
+    }
     const d=JSON.parse(t);
     if(d.error) throw new Error(d.error);
     dashModalBody(rmSuggestHTML(r,d));
   }catch(e){
-    dashModalBody('<div style="padding:16px;color:var(--bad)">วิเคราะห์ไม่สำเร็จ: '+esc(e.message||String(e))+'</div>');
+    const msg=(e&&e.name==='AbortError')?'รอนานเกินไป (เกิน 2.5 นาที) — ตอนนี้ AI น่าจะคนใช้เยอะ ลองกด 🤖 ซ้ำอีกครั้ง':(e.message||String(e));
+    dashModalBody('<div style="padding:16px;color:var(--bad)">วิเคราะห์ไม่สำเร็จ: '+esc(msg)+'</div>'
+      +'<div style="padding:0 16px 16px"><button class="btn small" onclick="rmSuggest(&quot;'+r._id+'&quot;)">↻ ลองใหม่</button></div>');
   }
 }
 

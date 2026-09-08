@@ -146,14 +146,15 @@ Deno.serve(async (req) => {
   let raw = "";
   let lastErr = "";
 
-  // Gemini ตอบ 503 (คนใช้เยอะ) เป็นครั้งคราว → ลองซ้ำอัตโนมัติสูงสุด 4 ครั้ง
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Gemini ตอบ 503 (คนใช้เยอะ) เป็นครั้งคราว → ลองซ้ำอัตโนมัติสูงสุด 3 ครั้ง (ครั้งละไม่เกิน 45 วิ)
+  for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await sleep(1200 * attempt);
     try {
       res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: payload,
+        signal: AbortSignal.timeout(45000),
       });
     } catch (e) {
       lastErr = String(e);
