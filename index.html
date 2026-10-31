@@ -1131,7 +1131,8 @@ const REG_KEYS = ['rq','rd','rm','fg','is','sl','formulas'];
 let session = null;
 let saving = false, dirty = false;
 let IS_EDITOR = true;        // สิทธิ์แก้ไข-ลบ (editor). ผู้ใช้ทั่วไป = เพิ่ม/ดูได้ แต่แก้/ลบของเดิมไม่ได้
-let serverIds = new Set();   // รหัสรายการที่อยู่บนเซิร์ฟเวอร์แล้ว (ใช้ในโหมดเพิ่มอย่างเดียว)
+let serverIds = new Set();   // รหัสรายการที่อยู่บนเซิร์ฟเวอร์แล้ว (ตามที่เครื่องนี้รู้ ณ โหลด/บันทึกล่าสุด)
+let serverData = new Map();  // ข้อมูลแต่ละรายการ ณ โหลด/บันทึกล่าสุด — ใช้หาว่ารายการไหนถูกแก้บนเครื่องนี้
 function canEdit(){ return IS_EDITOR; }
 
 function sbConfigured(){ return /^https:\/\/.+\.supabase\.co\/?$/.test(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 40; }
@@ -1196,7 +1197,7 @@ async function doLogin(){
 function doLogout(){
   if(!confirm('ออกจากระบบ?')) return;
   localStorage.removeItem(SESS_KEY); session=null;
-  state={rq:[],rd:[],rm:[],fg:[],is:[],sl:[],formulas:[]};
+  state={rq:[],rd:[],rm:[],fg:[],is:[],sl:[],formulas:[]}; serverIds=new Set(); serverData=new Map();
   loginScreen('');
 }
 /* ต่ออายุ token ที่หมดอายุ (Supabase ให้ token อายุ 1 ชม.) */
@@ -1232,13 +1233,14 @@ async function bootstrapData(){
     const res=await sbREST('rd_records?select=reg,rec_id,data&order=rec_id', {method:'GET'});
     const rows=await res.json();
     const s={rq:[],rd:[],rm:[],fg:[],is:[],sl:[],formulas:[]};
-    serverIds = new Set();
+    serverIds = new Set(); serverData = new Map();
     rows.forEach(function(r){
       serverIds.add(r.reg+'|'+r.rec_id);
       if(!s[r.reg]) return;
       const o=r.data||{};
       if(r.reg==='formulas'){ if(!o.id) o.id=r.rec_id; }
       else if(!o._id) o._id=r.rec_id;
+      serverData.set(r.reg+'|'+r.rec_id, stableJSON(o));
       s[r.reg].push(o);
     });
     state=s;
@@ -1274,7 +1276,8 @@ function applyRole(){
 }
 
 /* ---------- บันทึก (เรียกจากทุกจุดที่เดิมเรียก save()) ----------
-   บันทึกทั้งก้อนแบบ upsert + ลบรายการที่หายไป • ถ้ากดรัวๆ จะรวบเป็นครั้งเดียว */
+   editor: ส่งเฉพาะรายการที่เพิ่ม/แก้ + ลบเฉพาะรายการที่กดลบ บนเครื่องนี้ (ดู pushState)
+   ผู้ใช้ทั่วไป: เพิ่มรายการใหม่อย่างเดียว • ถ้ากดรัวๆ จะรวบเป็นครั้งเดียว */
 function save(){
   if(!sbConfigured()||!session) return;
   if(saving){ dirty=true; return; }
@@ -1295,6 +1298,14 @@ function save(){
 }
 /* รหัสประจำแถว: ทะเบียนทั่วไปใช้ _id • คลังสูตรใช้ id (usr-RD-69-001) */
 function recId(o){ return String((o && (o._id || o.id)) || ''); }
+/* แปลงเป็นข้อความโดยเรียงชื่อช่อง — ใช้เทียบว่ารายการถูกแก้หรือไม่ (ลำดับช่องต่างกันไม่นับว่าแก้) */
+function stableJSON(v){
+  if(v===undefined) return 'null';
+  if(v===null||typeof v!=='object') return JSON.stringify(v);
+  if(Array.isArray(v)) return '['+v.map(function(x){ return stableJSON(x); }).join(',')+']';
+  return '{'+Object.keys(v).sort().filter(function(k){ return v[k]!==undefined; })
+    .map(function(k){ return JSON.stringify(k)+':'+stableJSON(v[k]); }).join(',')+'}';
+}
 /* โหมดผู้ใช้ทั่วไป: เพิ่มเฉพาะรายการใหม่ (ไม่แตะของเดิม ไม่ลบ) — RLS ฝั่งเซิร์ฟเวอร์กันการแก้/ลบไว้อีกชั้น */
 async function pushInsertsOnly(snap){
   for(const reg of REG_KEYS){
@@ -1305,19 +1316,35 @@ async function pushInsertsOnly(snap){
     rows.forEach(function(o){ serverIds.add(reg+'|'+recId(o)); });
   }
 }
+/* โหมด editor: เทียบกับข้อมูล ณ โหลด/บันทึกล่าสุดของเครื่องนี้
+   - ส่งขึ้นเฉพาะรายการที่เพิ่มใหม่หรือถูกแก้บนเครื่องนี้
+   - ลบเฉพาะรายการที่เคยอยู่บนเซิร์ฟเวอร์ แล้วถูกกดลบบนเครื่องนี้
+   รายการที่คนอื่นเพิ่ม/แก้ระหว่างที่เปิดหน้านี้ค้างไว้ จะไม่ถูกทับหรือลบทิ้ง (กด 🔄 รีเฟรช เพื่อดึงมาดู) */
 async function pushState(snap){
   for(const reg of REG_KEYS){
-    const rows=(snap[reg]||[]).filter(function(o){ return recId(o); });
-    if(rows.length){
+    const local=new Map();
+    (snap[reg]||[]).forEach(function(o){ const id=recId(o); if(id) local.set(id,o); });
+    const changed=[];
+    local.forEach(function(o,id){ if(serverData.get(reg+'|'+id)!==stableJSON(o)) changed.push(o); });
+    const removed=[];
+    serverIds.forEach(function(k){
+      if(k.indexOf(reg+'|')!==0) return;
+      const id=k.slice(reg.length+1);
+      if(!local.has(id)) removed.push(id);
+    });
+    if(changed.length){
       await sbREST('rd_records?on_conflict=reg,rec_id', {
         method:'POST',
         headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
-        body:JSON.stringify(rows.map(function(o){ return {reg:reg, rec_id:recId(o), data:o}; }))
+        body:JSON.stringify(changed.map(function(o){ return {reg:reg, rec_id:recId(o), data:o}; }))
       });
-      const keep=rows.map(function(o){ return '"'+recId(o).replace(/"/g,'')+'"'; }).join(',');
-      await sbREST('rd_records?reg=eq.'+reg+'&rec_id=not.in.('+keep+')', {method:'DELETE',headers:{'Prefer':'return=minimal'}});
-    }else{
-      await sbREST('rd_records?reg=eq.'+reg, {method:'DELETE',headers:{'Prefer':'return=minimal'}});
+      changed.forEach(function(o){ const k=reg+'|'+recId(o); serverIds.add(k); serverData.set(k, stableJSON(o)); });
+    }
+    for(let i=0;i<removed.length;i+=50){
+      const part=removed.slice(i,i+50);
+      const list='('+part.map(function(id){ return '"'+id.replace(/(["\\])/g,'\\$1')+'"'; }).join(',')+')';
+      await sbREST('rd_records?reg=eq.'+reg+'&rec_id=in.'+encodeURIComponent(list), {method:'DELETE',headers:{'Prefer':'return=minimal'}});
+      part.forEach(function(id){ serverIds.delete(reg+'|'+id); serverData.delete(reg+'|'+id); });
     }
   }
 }
