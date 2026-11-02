@@ -2894,6 +2894,7 @@ function labelDialog(id, afterSave){
   const months=parseInt(r.shelfMonths)||12, mfg=r.date||todayISO(), exp=addMonths(mfg,months);
   const def=parseInt(r.producedQty)||12;
   let mode='2'; try{ mode=localStorage.getItem('rd-label-mode')||'2'; }catch(e){}
+  if(mode!=='1') mode='2';   // เหลือ 2 แบบ: 2 = รูปเครื่องความร้อน · 1 = A4
   const opt=function(v,t,s){ return '<label class="lopt"><input type="radio" name="lmode" value="'+v+'"'+(mode===v?' checked':'')+'><span><b>'+t+'</b><br><small>'+s+'</small></span></label>'; };
   const body='<div style="padding:14px">'
     +(afterSave?'<div style="margin-bottom:10px"><span class="pill ok">✓ บันทึก '+esc(r.code||'')+' แล้ว</span></div>':'')
@@ -2902,7 +2903,6 @@ function labelDialog(id, afterSave){
     +'<div style="font-weight:600;margin-bottom:6px">รูปแบบฉลาก</div>'
     +opt('2','รูปสำหรับเครื่องพิมพ์ความร้อน (แนะนำ)','Mdudu / Peripage — บันทึกรูป แล้วพิมพ์ผ่านแอป Fun Print')
     +opt('1','กระดาษ A4','หลายดวงต่อหน้า (36 ดวง/หน้า)')
-    +opt('3','สั่งพิมพ์ตรง 57 มม.','เฉพาะเครื่องที่ต่อคอมเป็นเครื่องพิมพ์')
     +'<div style="font-weight:600;margin:12px 0 6px">จำนวนดวง</div>'
     +'<div class="qtyrow"><button class="btn ghost" type="button" onclick="lblQty(-1)">−</button><input type="number" inputmode="numeric" id="lbl-n" min="1" max="200" value="'+def+'"><button class="btn ghost" type="button" onclick="lblQty(1)">＋</button></div>'
     +'<div class="hint" style="margin:6px 0 0">ค่าเริ่มต้น = จำนวนที่ผลิต'+(r.producedQty?' ('+esc(r.producedQty)+' '+esc(r.producedUnit||'')+')':' — ยังไม่ได้ใส่ จึงตั้งไว้ 12')+' · แบบรูปเครื่องความร้อนได้ครั้งละไม่เกิน 50 ดวง</div>'
